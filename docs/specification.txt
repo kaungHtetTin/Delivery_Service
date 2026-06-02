@@ -1,0 +1,676 @@
+# Mini Delivery Service Management System Specification
+
+## 1. System Overview
+
+The system is a mini delivery service management platform for operating a local delivery business. It supports delivery requests from individual customers and shops, real-time order monitoring by office staff, rider assignment, rider tracking, cash-on-delivery handling, delivery fee payments, and manual approval of mobile banking payments.
+
+The system will have three main portals:
+
+1. Client Portal
+2. Rider Portal
+3. Office Admin Dashboard Portal
+
+## 2. Business Story
+
+A customer buys a product from a shop but does not want to go to the shop to collect it. The customer contacts the delivery company and requests pickup from the shop and delivery to their home.
+
+Sometimes, a shop receives an online order from its own customer and requests the delivery company to deliver the product to the customer’s address.
+
+The delivery company receives the request, assigns a rider, tracks the rider, collects payment if needed, and completes the delivery.
+
+## 3. User Roles
+
+### 3.1 Client / Customer
+
+A client can be:
+
+* Individual customer
+* Shop owner
+* Business account
+
+Main responsibilities:
+
+* Submit delivery request
+* Provide pickup and delivery information
+* Share GPS location
+* View delivery status
+* Receive push notifications
+
+### 3.2 Rider / Delivery Man
+
+Main responsibilities:
+
+* Receive delivery assignments
+* Accept or reject assigned orders
+* Navigate to pickup and delivery locations
+* Update delivery status
+* Collect cash on delivery
+* Upload payment proof if needed
+* Request or perform order transfer to another rider
+
+### 3.3 Office Admin
+
+Main responsibilities:
+
+* Monitor incoming delivery requests
+* Assign riders manually or using system recommendation
+* Track rider locations in real time
+* Monitor delivery progress
+* Approve mobile banking payments
+* Handle rider switching alerts
+* Manage customers, shops, riders, orders, and reports
+
+### 3.4 Super Admin
+
+Main responsibilities:
+
+* Full system control
+* Manage branches, users, roles, pricing, settings, and reports
+* Access all business data
+
+---
+
+# 4. Main System Modules
+
+## 4.1 Client Portal
+
+The Client Portal allows customers and shops to submit delivery requests and track order status.
+
+### Features
+
+#### A. Client Registration and Login
+
+The system should support:
+
+* Phone number login
+* Email login
+* OTP login
+* Optional guest request submission
+
+Client information:
+
+* Name
+* Phone number
+* Email
+* Address
+* Client type: individual or shop
+* Saved locations
+
+#### B. Delivery Request Submission
+
+The client can create a delivery request by entering:
+
+Pickup information:
+
+* Pickup shop name
+* Pickup contact person
+* Pickup phone number
+* Pickup address
+* Pickup GPS location
+* Pickup note
+
+Delivery information:
+
+* Receiver name
+* Receiver phone number
+* Receiver address
+* Receiver GPS location
+* Delivery note
+
+Product information:
+
+* Product name
+* Product category
+* Quantity
+* Product value
+* Product photo, optional
+* Fragile item: yes/no
+* Special handling note
+
+Payment information:
+
+* Delivery fee payment method
+* Product payment method
+* Cash on delivery amount
+* Prepaid amount
+* Mobile banking screenshot upload
+
+#### C. GPS Location Capture
+
+The system should request permission to access the client’s GPS location.
+
+GPS can be used for:
+
+* Pickup location
+* Delivery location
+* Office dashboard map monitoring
+* Better rider assignment recommendation
+
+#### D. Delivery Status Tracking
+
+Clients can see order status:
+
+* Request submitted
+* Waiting for office approval
+* Rider assigned
+* Rider going to pickup
+* Product picked up
+* Rider going to delivery address
+* Delivered
+* Failed delivery
+* Cancelled
+
+#### E. Push Notifications
+
+Clients receive notifications for:
+
+* Order accepted
+* Rider assigned
+* Rider picked up product
+* Rider is near delivery location
+* Delivery completed
+* Payment approved
+* Delivery failed or cancelled
+
+---
+
+# 5. Office Admin Dashboard Portal
+
+The Office Admin Dashboard is the main control center for the delivery business.
+
+## 5.1 Dashboard Overview
+
+The dashboard should show:
+
+* New delivery requests
+* Active deliveries
+* Completed deliveries
+* Failed deliveries
+* Cancelled deliveries
+* Available riders
+* Busy riders
+* Offline riders
+* Today’s income
+* Pending mobile banking approvals
+* Cash collected by riders
+* Map with real-time rider locations
+
+## 5.2 Real-Time New Order Listener
+
+The office dashboard should always listen for new delivery requests.
+
+When a new request arrives:
+
+* Show popup alert
+* Play notification sound
+* Display order details
+* Allow admin to approve, reject, or assign rider
+
+## 5.3 Order Management
+
+Admin can:
+
+* View all orders
+* Filter by status
+* Filter by rider
+* Filter by date
+* Filter by client/shop
+* Search by order code, phone number, or receiver name
+* Edit order information
+* Cancel order
+* Mark failed delivery
+* Add internal notes
+
+## 5.4 Rider Assignment
+
+The system should support hybrid rider assignment:
+
+### A. Manual Assignment
+
+Admin manually selects a rider based on:
+
+* Rider availability
+* Distance
+* Current workload
+* Rider experience
+* Delivery area
+
+### B. Software Recommended Assignment
+
+The system recommends suitable riders based on:
+
+* Rider current GPS location
+* Distance to pickup location
+* Number of active orders
+* Rider availability
+* Rider rating/performance
+* Vehicle type
+* Delivery zone
+
+Recommended rider list example:
+
+1. Rider A — 1.2 km away, available
+2. Rider B — 2.0 km away, 1 active order
+3. Rider C — 3.5 km away, available
+
+Admin can accept the recommendation or choose another rider manually.
+
+## 5.5 Real-Time Rider Tracking
+
+Admin can monitor riders on a map.
+
+Tracking data:
+
+* Rider current location
+* Last updated time
+* Rider status
+* Assigned order
+* Route from pickup to delivery
+* Rider speed, optional
+* Battery status, optional
+
+## 5.6 Rider Switching Alert
+
+If an order is switched from one rider to another:
+
+* Office receives an alert
+* System logs old rider and new rider
+* Reason must be recorded
+* Admin can approve or reject the switch if required
+
+## 5.7 Payment Approval
+
+Supported delivery fee payment methods:
+
+* Cash on delivery
+* Prepaid
+* Cash
+* Mobile banking
+
+For mobile banking:
+
+* Client uploads screenshot
+* Admin reviews screenshot
+* Admin manually approves or rejects payment
+* Status changes to payment approved or payment rejected
+
+## 5.8 Reports
+
+The system should provide:
+
+* Daily order report
+* Monthly order report
+* Rider performance report
+* Cash collection report
+* Mobile banking payment report
+* Failed delivery report
+* Client/shop report
+* Income report
+
+---
+
+# 6. Rider Portal
+
+The Rider Portal is used by delivery staff to receive and complete orders.
+
+## 6.1 Rider Login
+
+Riders can login using:
+
+* Phone number
+* Email
+* Password
+* OTP, optional
+
+## 6.2 Assignment Notification
+
+When office assigns an order, rider receives:
+
+* Push notification
+* Sound alert
+* Order details
+* Pickup location
+* Delivery location
+* Payment information
+
+## 6.3 Order Acceptance
+
+Rider can:
+
+* Accept order
+* Reject order with reason
+* Request reassignment
+
+## 6.4 Rider Order Workflow
+
+Rider status flow:
+
+1. Assigned
+2. Accepted
+3. Going to pickup
+4. Arrived at pickup
+5. Product picked up
+6. Going to delivery address
+7. Arrived at delivery address
+8. Delivered
+9. Cash collected, if required
+10. Completed
+
+## 6.5 Cash on Delivery
+
+Rider can record:
+
+* Product cash collected
+* Delivery fee collected
+* Total cash collected
+* Payment note
+* Collection confirmation
+
+The system should calculate how much cash the rider must return to the office.
+
+## 6.6 Order Transfer / Rider Switching
+
+Rider can request transfer to another rider when:
+
+* Vehicle issue
+* Emergency
+* Wrong assignment
+* Too far from pickup
+* Rider unavailable
+
+Transfer process:
+
+* Rider requests transfer
+* Office receives alert
+* Office approves transfer
+* New rider receives assignment
+* System logs the transfer history
+
+Optional feature:
+
+* Rider-to-rider direct switch, but office must be notified.
+
+## 6.7 Rider GPS Tracking
+
+The rider app should send GPS location to the system while online.
+
+Tracking requirements:
+
+* Send location every few seconds or minutes
+* Reduce battery usage when idle
+* Show online/offline status
+* Show last active time
+
+---
+
+# 7. Order Lifecycle
+
+## Main Order Statuses
+
+1. Pending
+2. Approved
+3. Rider Assigned
+4. Rider Accepted
+5. Going to Pickup
+6. Arrived at Pickup
+7. Picked Up
+8. Going to Delivery
+9. Arrived at Delivery
+10. Delivered
+11. Completed
+12. Failed
+13. Cancelled
+
+## Payment Statuses
+
+1. Unpaid
+2. Pending Approval
+3. Paid
+4. Rejected
+5. Refunded, optional
+
+## Rider Statuses
+
+1. Offline
+2. Online
+3. Available
+4. Busy
+5. On Break
+6. Suspended
+
+---
+
+# 8. Payment Module
+
+## Supported Payment Types
+
+### A. Delivery Fee Payment
+
+* Cash
+* Cash on delivery
+* Prepaid
+* Mobile banking
+
+### B. Product Payment
+
+* Already paid to shop
+* Rider collects from customer
+* Shop collects separately
+* Mobile banking proof uploaded
+
+## Mobile Banking Flow
+
+1. Client chooses mobile banking
+2. Client uploads screenshot
+3. System marks payment as pending approval
+4. Office admin reviews screenshot
+5. Admin approves or rejects
+6. Client and rider receive notification
+
+---
+
+# 9. Notification System
+
+## Notification Channels
+
+* In-app notification
+* Push notification
+* SMS, optional
+* Email, optional
+
+## Notification Events
+
+* New order submitted
+* Order approved
+* Order rejected
+* Rider assigned
+* Rider accepted order
+* Product picked up
+* Rider near delivery location
+* Delivery completed
+* Payment approved
+* Payment rejected
+* Rider switch requested
+* Rider switch approved
+* Order cancelled
+* Delivery failed
+
+---
+
+# 10. Map and GPS Features
+
+The system should include map integration.
+
+Recommended map features:
+
+* Pickup location pin
+* Delivery location pin
+* Rider live location
+* Route display
+* Distance calculation
+* Estimated delivery time
+* Nearby rider recommendation
+* Delivery zone management
+
+Possible map providers:
+
+* Google Maps
+* Mapbox
+* OpenStreetMap
+
+---
+
+# 11. Admin Management Features
+
+Super Admin can manage:
+
+* Staff accounts
+* Rider accounts
+* Client accounts
+* Shop accounts
+* Delivery zones
+* Delivery pricing
+* Payment methods
+* Notification settings
+* System roles and permissions
+* Reports
+* Branches, optional
+
+---
+
+# 12. Pricing Management
+
+The system should support configurable delivery fee calculation.
+
+Pricing methods:
+
+* Fixed delivery fee
+* Distance-based fee
+* Zone-based fee
+* Weight-based fee, optional
+* Urgent delivery extra fee
+* Night delivery extra fee
+* Shop contract pricing
+
+Example:
+
+* Base fee: 2,000 MMK
+* First 3 km included
+* Extra 1 km: 500 MMK
+* Fragile item fee: 1,000 MMK
+
+---
+
+# 13. Security Requirements
+
+The system should include:
+
+* Login authentication
+* Role-based access control
+* Password encryption
+* Secure API tokens
+* Input validation
+* File upload validation
+* Payment screenshot protection
+* Activity logs
+* Admin action logs
+* Rider transfer logs
+
+---
+
+# 14. Recommended Technology Stack
+
+## Web System
+
+* Frontend: React
+* Backend: Laravel
+* Database: MySQL or PostgreSQL
+* Real-time communication: Socket.IO
+* Push notification: Firebase Cloud Messaging
+* Maps: Google Maps
+* File storage: Local storage (if order accept delete the product photo)
+
+## Mobile Option
+
+For rider portal, use:
+
+* Progressive Web App, easier and cheaper
+
+
+Recommended first version:
+
+* Client Portal: Web/PWA
+* Rider Portal: PWA / (Android Studio in future)
+* Admin Dashboard: Web dashboard
+
+---
+
+# 15. Database Tables
+
+Recommended main tables:
+
+* users
+* roles
+* permissions
+* clients
+* shops
+* riders
+* delivery_orders
+* order_status_histories
+* rider_locations
+* payments
+* payment_screenshots
+* cash_collections
+* rider_transfers
+* notifications
+* delivery_zones
+* pricing_rules
+* branches
+* admin_logs
+
+---
+
+# 16. Minimum Viable Product Features
+
+For the first version, build:
+
+1. Client delivery request form
+2. Admin dashboard for new orders
+3. Manual rider assignment
+4. Rider portal with order status update
+5. Basic GPS tracking
+6. Delivery status tracking
+7. Cash on delivery record
+8. Mobile banking screenshot upload
+9. Manual payment approval
+10. Push notification
+11. Basic reports
+
+---
+
+# 17. Future Advanced Features
+
+Later versions can include:
+
+* Automatic rider assignment
+* Route optimization
+* Customer rating
+* Rider rating
+* Shop contract account
+* Multiple branches
+* SMS notification
+* Delivery proof photo
+* Receiver signature
+* QR code order verification
+* Barcode scanning
+* Wallet system
+* AI delivery time prediction
+* Auto delivery fee calculation
+* Rider settlement report
+* Customer support ticket system
+
+---
+
+# 18. Final Goal
+
+The goal of this system is to help the delivery business operate smoothly by reducing manual communication, improving order control, tracking riders in real time, managing payments clearly, and providing a professional experience for customers, shops, riders, and office staff.
