@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "./icons";
 import {
+  assignDeliveryOrder,
+  createDeliveryOrder,
+  fetchOrders,
+  fetchRiders,
+  updateDeliveryOrderStatus,
+} from "./api";
+import {
   initialOrders,
   initialRiders,
   nextRiderActions,
@@ -238,9 +245,10 @@ function ClientPortal({ orders, submitOrder, themeProps }) {
         {page === "new" && (
           <NewRequest
             onCancel={() => setPage("home")}
-            onSubmit={(order) => {
-              submitOrder(order);
-              openTracking(order.id);
+            onSubmit={async (order) => {
+              const submittedOrder = await submitOrder(order);
+              openTracking(submittedOrder.id);
+              return submittedOrder;
             }}
           />
         )}
@@ -324,7 +332,7 @@ function ClientHome({ activeOrder, onCreate, onTrack, orders }) {
               <span className="row-icon"><Icon name="box" size={17} /></span>
               <span className="row-content">
                 <strong>{order.destination.split(",")[0]}</strong>
-                <small>{order.id} · {order.createdAt}</small>
+                <small>{order.id} - {order.createdAt}</small>
               </span>
               <StatusBadge status={order.status} />
             </button>
@@ -394,9 +402,9 @@ function NewRequest({ onCancel, onSubmit }) {
         : step === 3
           ? form.product
           : true;
-  const submit = () => {
+  const submit = async () => {
     const id = `FD-${String(Date.now()).slice(-6)}`;
-    onSubmit({
+    const submittedOrder = await onSubmit({
       ...form,
       id,
       client: "Moe Thandar",
@@ -409,6 +417,7 @@ function NewRequest({ onCancel, onSubmit }) {
       fee: 3000,
       riderId: null,
     });
+    return submittedOrder;
   };
 
   return (
@@ -457,7 +466,7 @@ function NewRequest({ onCancel, onSubmit }) {
             <label className="upload-box">
               <Icon name="upload" />
               <strong>Add product photo</strong>
-              <small>Optional · JPG or PNG</small>
+              <small>Optional - JPG or PNG</small>
               <input hidden type="file" />
             </label>
           </>
@@ -495,7 +504,7 @@ function NewRequest({ onCancel, onSubmit }) {
             <FormIntro icon="check" title="Review your delivery request" text="Confirm these details before submitting." />
             <ReviewSection label="Pickup" title={form.pickupContact} lines={[form.pickupPhone, form.pickup]} />
             <ReviewSection label="Delivery" title={form.receiver} lines={[form.receiverPhone, form.destination]} />
-            <ReviewSection label="Product" title={form.product} lines={[`${form.quantity} item(s) · ${form.category}`, form.fragile ? "Fragile handling required" : "Standard handling"]} />
+            <ReviewSection label="Product" title={form.product} lines={[`${form.quantity} item(s) - ${form.category}`, form.fragile ? "Fragile handling required" : "Standard handling"]} />
             <ReviewSection label="Payment" title={form.paymentMethod} lines={[`Product COD: ${money(form.cod)}`, "Estimated delivery fee: 3,000 MMK"]} />
           </>
         )}
@@ -505,7 +514,14 @@ function NewRequest({ onCancel, onSubmit }) {
         <button
           className="btn primary grow"
           disabled={!canContinue}
-          onClick={() => (step === 5 ? submit() : setStep(step + 1))}
+          onClick={async () => {
+            if (step < 5) {
+              setStep(step + 1);
+              return;
+            }
+
+            await submit();
+          }}
           type="button"
         >
           {step === 5 ? "Submit delivery request" : "Continue"}
@@ -654,7 +670,7 @@ function RiderJobs({ onOpen, orders, rider }) {
         <div>
           <p className="eyebrow">RIDER WORKSPACE</p>
           <h1>Good evening, {rider.name.split(" ")[0]}</h1>
-          <p><span className="online-dot" /> GPS active · Updated just now</p>
+          <p><span className="online-dot" /> GPS active - Updated just now</p>
         </div>
         <label className="availability">
           <small>AVAILABLE</small><input defaultChecked type="checkbox" /><i />
@@ -712,7 +728,7 @@ function RiderJobDetail({ order, onBack, onProgress }) {
       <section className="order-summary glass">
         <div><small>PRODUCT</small><strong>{order.product}</strong></div>
         <div><small>COD TO COLLECT</small><strong>{money(order.cod)}</strong></div>
-        {order.fragile && <p className="warning-note">Fragile item · Handle with care</p>}
+        {order.fragile && <p className="warning-note">Fragile item - Handle with care</p>}
       </section>
       <div className="sticky-actions glass">
         <button className="btn secondary" type="button"><Icon name="more" size={16} /> Issue</button>
@@ -808,8 +824,8 @@ function AdminPortal({ orders, riders, assignRider, selectedOrderId, setSelected
                 <div className="panel glass">
                   <PanelHeading title="Attention needed" eyebrow="ALERTS" />
                   <div className="alert-list">
-                    <div><span className="alert-icon warning"><Icon name="card" size={15} /></span><p><strong>Payment awaiting review</strong><small>FD-240621 · 4 min ago</small></p></div>
-                    <div><span className="alert-icon info"><Icon name="bike" size={15} /></span><p><strong>Rider location updated</strong><small>Aung Kyaw · 1 min ago</small></p></div>
+                    <div><span className="alert-icon warning"><Icon name="card" size={15} /></span><p><strong>Payment awaiting review</strong><small>FD-240621 - 4 min ago</small></p></div>
+                    <div><span className="alert-icon info"><Icon name="bike" size={15} /></span><p><strong>Rider location updated</strong><small>Aung Kyaw - 1 min ago</small></p></div>
                   </div>
                 </div>
               </section>
@@ -874,7 +890,7 @@ function OrderTable({ orders, riders, selectOrder }) {
               <tr key={order.id} onClick={() => selectOrder(order.id)}>
                 <td><strong>{order.id}</strong><small>{order.createdAt}</small></td>
                 <td><strong>{order.client}</strong><small>{order.clientPhone}</small></td>
-                <td><strong>{order.pickup.split(",")[0]} → {order.destination.split(",")[0]}</strong><small>{money(order.cod)} COD</small></td>
+                <td><strong>{order.pickup.split(",")[0]} -&gt; {order.destination.split(",")[0]}</strong><small>{money(order.cod)} COD</small></td>
                 <td>{rider ? <span className="rider-cell"><i>{rider.initials}</i>{rider.name}</span> : <span className="muted">Unassigned</span>}</td>
                 <td><StatusBadge status={order.paymentStatus} /></td>
                 <td><StatusBadge status={order.status} /></td>
@@ -890,7 +906,7 @@ function OrderTable({ orders, riders, selectOrder }) {
 }
 
 function RiderSummary({ riders }) {
-  return <div className="rider-summary">{riders.slice(0, 4).map((rider) => <div key={rider.id}><span className="avatar">{rider.initials}</span><p><strong>{rider.name}</strong><small>{rider.area} · {rider.lastSeen}</small></p><StatusBadge status={rider.status} /></div>)}</div>;
+  return <div className="rider-summary">{riders.slice(0, 4).map((rider) => <div key={rider.id}><span className="avatar">{rider.initials}</span><p><strong>{rider.name}</strong><small>{rider.area} - {rider.lastSeen}</small></p><StatusBadge status={rider.status} /></div>)}</div>;
 }
 
 function RidersAdmin({ riders }) {
@@ -923,7 +939,7 @@ function OrderDrawer({ order, riders, close, onAssign }) {
       <AddressBlock from={order.pickup} to={order.destination} />
       <section><p className="eyebrow">CONTACTS</p><div className="detail-row"><span>Pickup</span><strong>{order.pickupContact}</strong></div><div className="detail-row"><span>Receiver</span><strong>{order.receiver}</strong></div></section>
       <section><p className="eyebrow">PACKAGE & PAYMENT</p><div className="detail-row"><span>Product</span><strong>{order.product}</strong></div><div className="detail-row"><span>Delivery fee</span><strong>{money(order.fee)}</strong></div><div className="detail-row"><span>Product COD</span><strong>{money(order.cod)}</strong></div></section>
-      <section><p className="eyebrow">RIDER ASSIGNMENT</p>{rider ? <div className="assigned-rider"><span className="avatar">{rider.initials}</span><div><strong>{rider.name}</strong><small>{rider.phone} · {rider.vehicle}</small></div></div> : <p className="muted">No rider assigned yet.</p>}</section>
+      <section><p className="eyebrow">RIDER ASSIGNMENT</p>{rider ? <div className="assigned-rider"><span className="avatar">{rider.initials}</span><div><strong>{rider.name}</strong><small>{rider.phone} - {rider.vehicle}</small></div></div> : <p className="muted">No rider assigned yet.</p>}</section>
       <div className="drawer-actions"><button className="btn secondary" type="button">Add note</button><button className="btn primary grow" onClick={onAssign} type="button"><Icon name="bike" size={16} /> {rider ? "Change rider" : "Assign rider"}</button></div>
     </aside>
   );
@@ -934,12 +950,12 @@ function AssignmentModal({ order, riders, close, onAssign }) {
   return (
     <div className="modal-backdrop">
       <section className="assignment-modal glass">
-        <div className="drawer-header"><div><p className="eyebrow">MANUAL ASSIGNMENT</p><h2>Assign rider</h2><small>{order.id} · Pickup from {order.pickup.split(",")[0]}</small></div><button className="icon-btn" onClick={close} type="button"><Icon name="close" /></button></div>
+        <div className="drawer-header"><div><p className="eyebrow">MANUAL ASSIGNMENT</p><h2>Assign rider</h2><small>{order.id} - Pickup from {order.pickup.split(",")[0]}</small></div><button className="icon-btn" onClick={close} type="button"><Icon name="close" /></button></div>
         <div className="search-box"><Icon name="search" size={16} /><input placeholder="Search rider by name or area" /></div>
         <div className="assignment-list">
           {riders.map((rider) => (
             <button className={selected === rider.id ? "selected" : ""} disabled={rider.status === "offline"} key={rider.id} onClick={() => setSelected(rider.id)} type="button">
-              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} · {rider.activeOrders} active · {rider.lastSeen}</small></span><StatusBadge status={rider.status} />
+              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} active - {rider.lastSeen}</small></span><StatusBadge status={rider.status} />
             </button>
           ))}
         </div>
@@ -963,12 +979,71 @@ export default function App() {
   const themeStyle = useMemo(() => ({ "--color-primary": brand }), [brand]);
   const themeProps = { theme, setTheme, brand, setBrand };
 
-  const submitOrder = (order) => setOrders((current) => [order, ...current]);
-  const assignRider = (orderId, riderId) => {
-    setOrders((current) => current.map((order) => order.id === orderId ? { ...order, riderId, status: "rider_assigned", updatedAt: "Just now" } : order));
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([fetchOrders(), fetchRiders()])
+      .then(([remoteOrders, remoteRiders]) => {
+        if (!cancelled) {
+          setOrders(remoteOrders);
+          setRiders(remoteRiders);
+        }
+      })
+      .catch(() => {
+        // Keep persisted demo state available when the API server is offline.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setOrders, setRiders]);
+
+  const submitOrder = async (order) => {
+    let submittedOrder = order;
+
+    try {
+      submittedOrder = await createDeliveryOrder(order);
+    } catch {
+      // The local prototype remains usable without a running API server.
+    }
+
+    setOrders((current) => [
+      submittedOrder,
+      ...current.filter((item) => item.id !== submittedOrder.id),
+    ]);
+
+    return submittedOrder;
+  };
+  const assignRider = async (orderId, riderId) => {
+    const order = orders.find((item) => item.id === orderId);
+    const rider = riders.find((item) => item.id === riderId);
+    let assignedOrder = null;
+
+    if (order?._apiId && rider?._apiId) {
+      try {
+        assignedOrder = await assignDeliveryOrder(order, rider);
+      } catch {
+        // Fall back to local prototype state when the API is unavailable.
+      }
+    }
+
+    setOrders((current) => current.map((item) => item.id === orderId ? assignedOrder || { ...item, riderId, status: "rider_assigned", updatedAt: "Just now" } : item));
     setRiders((current) => current.map((rider) => rider.id === riderId ? { ...rider, status: "busy", activeOrders: rider.activeOrders + 1 } : rider));
   };
-  const progressOrder = (orderId, status) => setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, updatedAt: "Just now" } : order));
+  const progressOrder = async (orderId, status) => {
+    const order = orders.find((item) => item.id === orderId);
+    let updatedOrder = null;
+
+    if (order?._apiId) {
+      try {
+        updatedOrder = await updateDeliveryOrderStatus(order, status);
+      } catch {
+        // Preserve the demo workflow when the API is unavailable.
+      }
+    }
+
+    setOrders((current) => current.map((item) => item.id === orderId ? updatedOrder || { ...item, status, updatedAt: "Just now" } : item));
+  };
 
   return (
     <div className="app-root" data-theme={theme} style={themeStyle}>

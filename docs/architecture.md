@@ -2,34 +2,54 @@
 
 ## Current Decision
 
-Build the platform as a React frontend with a Laravel API backend. Deliver the MVP through small vertical slices so client, office, and rider workflows remain connected as backend capabilities are added.
+Build the platform as one Laravel application with React mounted through Laravel Vite integration. Deliver the MVP through small vertical slices so client, office, and rider workflows remain connected as backend capabilities are added.
 
-## Local Environment Constraint
+## Local Backend Baseline
 
-The current machine provides PHP `8.0.7`. A modern Laravel baseline requires a PHP upgrade before backend scaffolding. Upgrade PHP before creating the Laravel API project so the application is not locked to an outdated framework release.
+The current machine provides PHP `8.0.7`, so the initial backend is scaffolded on Laravel `9.52.21`. This is a local-compatible foundation that allows API development to proceed immediately.
 
-Recommended backend prerequisite:
+Upgrade path before production:
 
 * PHP `8.2+`
+* A current supported Laravel release
 * Current Composer release
-* MySQL for the initial local environment
+* MySQL or PostgreSQL for the deployed environment
 
 ## Frontend
 
-The initial frontend is a React and Vite application.
+The frontend is a React and Vite application inside Laravel.
 
 Structure:
 
 ```text
-src/
-  App.jsx       Portal shells, screens, and prototype workflow state
-  data.js       Seed data and status definitions
-  icons.jsx     Shared SVG icon component
-  main.jsx      React entry point
-  styles.css    Theme tokens and responsive design system
+resources/
+  js/
+    DeliveryApp.jsx Portal shells, screens, and prototype workflow state
+    api.js        Laravel API adapter with local fallback behavior
+    data.js       Seed data and status definitions
+    icons.jsx     Shared SVG icon component
+    main.jsx      React entry point
+    styles.css    Theme tokens and responsive design system
+  views/
+    app.blade.php Laravel HTML shell
 ```
 
-The prototype currently uses browser storage. Replace the local state boundary with API services when the Laravel backend is ready.
+The React prototype now hydrates orders and riders from the Laravel API when it is available. It retains browser storage as a fallback so UI work remains usable while the backend server is offline.
+
+## Backend
+
+The Laravel API and React frontend live together at the repository root.
+
+Current foundation:
+
+* Guest delivery request creation and order listing
+* Order detail with rider, status history, payments, and COD relationship
+* Office manual rider assignment
+* Guarded rider workflow status updates
+* Rider list and active assignment list
+* Rider GPS location reporting
+* SQLite local environment and demo seed data
+* Feature tests for request creation, assignment, workflow guards, and GPS reporting
 
 ## Backend Roadmap
 
