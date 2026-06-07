@@ -17,9 +17,12 @@ class DeliveryOrderController extends Controller
     public function index(Request $request): JsonResponse
     {
         $orders = DeliveryOrder::query()
-            ->with('rider')
+            ->with(['rider', 'payments'])
             ->when($request->string('status')->toString(), fn ($query, $status) => $query->where('status', $status))
+            ->when($request->string('payment_status')->toString(), fn ($query, $status) => $query->where('payment_status', $status))
             ->when($request->integer('rider_id'), fn ($query, $riderId) => $query->where('rider_id', $riderId))
+            ->when($request->date('date_from'), fn ($query, $date) => $query->whereDate('created_at', '>=', $date))
+            ->when($request->date('date_to'), fn ($query, $date) => $query->whereDate('created_at', '<=', $date))
             ->when($request->string('search')->toString(), function ($query, $search) {
                 $query->where(function ($query) use ($search) {
                     $query

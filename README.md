@@ -20,7 +20,9 @@ The application includes:
 composer install
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 php artisan key:generate
-if (-not (Test-Path database/database.sqlite)) { New-Item -ItemType File database/database.sqlite }
+
+# Create this database in MySQL first if it does not exist:
+# CREATE DATABASE delivery_service CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 php artisan migrate --seed
 php artisan serve
 ```
@@ -32,7 +34,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:8000`. The local application uses SQLite so it can run without additional database setup.
+Open `http://127.0.0.1:8000`. The local application uses MySQL by default; update `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` in `.env` if your local MySQL credentials differ.
 
 ## Build
 

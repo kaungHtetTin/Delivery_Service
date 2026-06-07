@@ -1,10 +1,11 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 async function request(path, options = {}) {
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       Accept: "application/json",
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...options.headers,
     },
     ...options,
@@ -52,6 +53,12 @@ export function mapOrder(order) {
     status: order.status,
     paymentStatus: order.payment_status,
     paymentMethod: humanize(order.delivery_fee_payment_method),
+    paymentId: order.payments?.[0]?.id || null,
+    paymentScreenshot: order.payments?.[0]?.screenshot_path || null,
+    paymentReviewedAt: order.payments?.[0]?.reviewed_at
+      ? new Date(order.payments[0].reviewed_at).toLocaleString()
+      : null,
+    paymentNote: order.payments?.[0]?.note || "",
     cod: Number(order.cod_amount),
     fee: Number(order.delivery_fee),
     riderId: order.rider?.code || null,
@@ -112,7 +119,26 @@ export async function createDeliveryOrder(order) {
     }),
   });
 
+  if (order.paymentScreenshot && response.payments?.[0]?.id) {
+    const formData = new FormData();
+    formData.append("screenshot", order.paymentScreenshot);
+
+    const uploadResponse = await request(`/payments/${response.payments[0].id}/screenshot`, {
+      method: "POST",
+      body: formData,
+    });
+
+    return mapOrder({
+      ...uploadResponse.delivery_order,
+      payments: [uploadResponse],
+    });
+  }
+
   return mapOrder(response);
+}
+
+export async function fetchReportSummary() {
+  return request("/reports/summary");
 }
 
 export async function assignDeliveryOrder(order, rider) {
@@ -134,4 +160,16 @@ export async function updateDeliveryOrderStatus(order, status) {
   });
 
   return mapOrder(response);
+}
+
+export async function reviewPayment(paymentId, status, note = "") {
+  const response = await request(`/payments/${paymentId}/review`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, note }),
+  });
+
+  return mapOrder({
+    ...response.delivery_order,
+    payments: [response],
+  });
 }
