@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Icon } from "../icons";
+import { statusLabels } from "../data";
 import { activeStatuses, money } from "../utils";
-import { AddressBlock, MobileNav, MobilePlaceholder, MobileTopbar, StatusBadge } from "../components/shared";
+import { AddressBlock, MobileNav, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
 
-export function ClientPortal({ orders, submitOrder, themeProps }) {
+export function ClientPortal({ markNotificationRead, notifications = [], orders, submitOrder, themeProps, user }) {
   const [page, setPage] = useState("home");
   const [selectedId, setSelectedId] = useState(null);
   const activeOrder = orders.find((order) => activeStatuses.has(order.status));
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
   const openTracking = (id) => {
     setSelectedId(id);
@@ -15,10 +17,10 @@ export function ClientPortal({ orders, submitOrder, themeProps }) {
 
   return (
     <div className="mobile-app">
-      <MobileTopbar themeProps={themeProps} />
+      <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
       <main className="mobile-content">
         {page === "home" && (
-          <ClientHome activeOrder={activeOrder} onCreate={() => setPage("new")} onTrack={openTracking} orders={orders} />
+          <ClientHome activeOrder={activeOrder} onCreate={() => setPage("new")} onTrack={openTracking} orders={orders} user={user} />
         )}
         {page === "orders" && <ClientOrders onTrack={openTracking} orders={orders} />}
         {page === "new" && (
@@ -29,6 +31,7 @@ export function ClientPortal({ orders, submitOrder, themeProps }) {
               openTracking(submittedOrder.id);
               return submittedOrder;
             }}
+            user={user}
           />
         )}
         {page === "tracking" && (
@@ -37,8 +40,8 @@ export function ClientPortal({ orders, submitOrder, themeProps }) {
             order={orders.find((order) => order.id === selectedId) || activeOrder || orders[0]}
           />
         )}
-        {page === "notifications" && <MobilePlaceholder icon="bell" title="Notifications" />}
-        {page === "account" && <MobilePlaceholder icon="user" title="Your account" />}
+        {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
+        {page === "account" && <ClientAccount user={user} />}
       </main>
       {page !== "new" && (
         <MobileNav
@@ -57,12 +60,14 @@ export function ClientPortal({ orders, submitOrder, themeProps }) {
   );
 }
 
-function ClientHome({ activeOrder, onCreate, onTrack, orders }) {
+function ClientHome({ activeOrder, onCreate, onTrack, orders, user }) {
+  const firstName = user?.name?.split(" ")[0] || "there";
+
   return (
     <>
       <section className="hero">
         <p className="eyebrow">TUESDAY, 02 JUNE</p>
-        <h1>Good evening, Moe</h1>
+        <h1>Good evening, {firstName}</h1>
         <p>What would you like to deliver today?</p>
         <button className="btn primary hero-btn" onClick={onCreate} type="button">
           <span>
@@ -155,7 +160,30 @@ function ClientOrders({ orders, onTrack }) {
   );
 }
 
-function NewRequest({ onCancel, onSubmit }) {
+function ClientAccount({ user }) {
+  return (
+    <section className="page-section">
+      <p className="eyebrow">ACCOUNT</p>
+      <h1>Your account</h1>
+      <div className="compact-list glass">
+        <div className="compact-row">
+          <span className="row-icon"><Icon name="user" size={17} /></span>
+          <span className="row-content"><strong>{user.name}</strong><small>Client account</small></span>
+        </div>
+        <div className="compact-row">
+          <span className="row-icon"><Icon name="phone" size={16} /></span>
+          <span className="row-content"><strong>{user.phone}</strong><small>Primary phone number</small></span>
+        </div>
+        <div className="compact-row">
+          <span className="row-icon"><Icon name="card" size={16} /></span>
+          <span className="row-content"><strong>{user.email}</strong><small>Login email</small></span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NewRequest({ onCancel, onSubmit, user }) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     pickupContact: "",
@@ -189,8 +217,8 @@ function NewRequest({ onCancel, onSubmit }) {
     const submittedOrder = await onSubmit({
       ...form,
       id,
-      client: "Moe Thandar",
-      clientPhone: "09 774 221 890",
+      client: user.name,
+      clientPhone: user.phone,
       createdAt: "Just now",
       updatedAt: "Just now",
       status: "pending",

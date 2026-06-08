@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Rider;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,6 +16,9 @@ class RiderController extends Controller
             ->withCount(['deliveryOrders as active_orders_count' => function ($query) {
                 $query->whereNotIn('status', ['completed', 'failed', 'cancelled']);
             }])
+            ->when($request->user()?->role === User::ROLE_RIDER, function ($query) use ($request) {
+                $query->where('user_id', $request->user()->id);
+            })
             ->when($request->string('status')->toString(), fn ($query, $status) => $query->where('status', $status))
             ->orderBy('name')
             ->get();
@@ -22,8 +26,10 @@ class RiderController extends Controller
         return response()->json(['data' => $riders]);
     }
 
-    public function assignments(Rider $rider): JsonResponse
+    public function assignments(Request $request, Rider $rider): JsonResponse
     {
+        $this->authorizeRiderAccess($request, $rider);
+
         $orders = $rider->deliveryOrders()
             ->whereNotIn('status', ['completed', 'failed', 'cancelled'])
             ->latest()
@@ -34,6 +40,8 @@ class RiderController extends Controller
 
     public function storeLocation(Request $request, Rider $rider): JsonResponse
     {
+        $this->authorizeRiderAccess($request, $rider);
+
         $validated = $request->validate([
             'delivery_order_id' => ['nullable', 'integer', 'exists:delivery_orders,id'],
             'latitude' => ['required', 'numeric', 'between:-90,90'],
@@ -53,5 +61,12 @@ class RiderController extends Controller
         ]);
 
         return response()->json($location, 201);
+    }
+
+    private function authorizeRiderAccess(Request $request, Rider $rider): void
+    {
+        if ($request->user()?->role === User::ROLE_RIDER && (int) $rider->user_id !== (int) $request->user()->id) {
+            abort(403);
+        }
     }
 }

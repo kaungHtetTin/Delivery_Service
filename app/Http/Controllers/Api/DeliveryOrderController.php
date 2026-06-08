@@ -7,6 +7,8 @@ use App\Http\Requests\StoreDeliveryOrderRequest;
 use App\Http\Requests\UpdateDeliveryOrderStatusRequest;
 use App\Models\DeliveryOrder;
 use App\Models\Rider;
+use App\Models\User;
+use App\Notifications\OrderActivityNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,12 @@ class DeliveryOrderController extends Controller
     {
         $orders = DeliveryOrder::query()
             ->with(['rider', 'payments'])
+            ->when($request->user()?->role === User::ROLE_CLIENT, function ($query) use ($request) {
+                $query->where('client_user_id', $request->user()->id);
+            })
+            ->when($request->user()?->role === User::ROLE_RIDER, function ($query) use ($request) {
+                $query->whereHas('rider', fn ($query) => $query->where('user_id', $request->user()->id));
+            })
             ->when($request->string('status')->toString(), fn ($query, $status) => $query->where('status', $status))
             ->when($request->string('payment_status')->toString(), fn ($query, $status) => $query->where('payment_status', $status))
             ->when($request->integer('rider_id'), fn ($query, $riderId) => $query->where('rider_id', $riderId))
@@ -42,6 +50,9 @@ class DeliveryOrderController extends Controller
     {
         $order = DB::transaction(function () use ($request) {
             $attributes = $request->validated();
+            $attributes['client_user_id'] = $request->user()?->role === User::ROLE_CLIENT
+                ? $request->user()->id
+                : null;
             $attributes['payment_status'] = $attributes['delivery_fee_payment_method'] === 'mobile_banking'
                 ? 'pending_approval'
                 : 'unpaid';
@@ -57,6 +68,13 @@ class DeliveryOrderController extends Controller
                     'status' => 'pending_approval',
                 ]);
             }
+
+            $this->notifyClient(
+                $order,
+                'order_created',
+                'Delivery request received',
+                "Your request {$order->code} is waiting for office review."
+            );
 
             return $order;
         });
@@ -127,6 +145,21 @@ class DeliveryOrderController extends Controller
 
             $rider->update(['status' => 'busy']);
 
+            $this->notifyClient(
+                $deliveryOrder,
+                'rider_assigned',
+                'Rider assigned',
+                "{$rider->name} has been assigned to {$deliveryOrder->code}.",
+                ['rider_id' => $rider->id, 'rider_name' => $rider->name]
+            );
+            $this->notifyRider(
+                $rider,
+                $deliveryOrder,
+                'new_assignment',
+                'New delivery assignment',
+                "Pickup is ready for {$deliveryOrder->code}."
+            );
+
             if ($previousRider && $previousRider->isNot($rider)) {
                 $this->releaseRiderWhenIdle($previousRider, $deliveryOrder->id);
             }
@@ -164,6 +197,14 @@ class DeliveryOrderController extends Controller
                 'note' => $validated['note'] ?? null,
             ]);
 
+            $this->notifyClient(
+                $deliveryOrder,
+                'status_updated',
+                'Delivery status updated',
+                "{$deliveryOrder->code} is now {$this->statusLabel($status)}.",
+                ['status' => $status]
+            );
+
             if (in_array($status, ['completed', 'failed', 'cancelled'], true) && $deliveryOrder->rider) {
                 $this->releaseRiderWhenIdle($deliveryOrder->rider, $deliveryOrder->id);
             }
@@ -182,5 +223,24 @@ class DeliveryOrderController extends Controller
         if (! $hasOtherActiveOrders) {
             $rider->update(['status' => 'available']);
         }
+    }
+
+    private function notifyClient(DeliveryOrder $order, string $kind, string $title, string $body, array $meta = []): void
+    {
+        $order->loadMissing('clientUser');
+
+        $order->clientUser?->notify(new OrderActivityNotification($order, $kind, $title, $body, $meta));
+    }
+
+    private function notifyRider(Rider $rider, DeliveryOrder $order, string $kind, string $title, string $body, array $meta = []): void
+    {
+        $rider->loadMissing('user');
+
+        $rider->user?->notify(new OrderActivityNotification($order, $kind, $title, $body, $meta));
+    }
+
+    private function statusLabel(string $status): string
+    {
+        return str($status)->replace('_', ' ')->title()->toString();
     }
 }

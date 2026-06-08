@@ -5,7 +5,9 @@ namespace Database\Seeders;
 use App\Models\DeliveryOrder;
 use App\Models\Payment;
 use App\Models\Rider;
+use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class DeliveryDemoSeeder extends Seeder
 {
@@ -16,9 +18,38 @@ class DeliveryDemoSeeder extends Seeder
      */
     public function run()
     {
+        $officeUser = User::updateOrCreate(
+            ['email' => 'office@example.test'],
+            [
+                'name' => 'May Aye',
+                'phone' => '09 500 100 100',
+                'password' => Hash::make('password'),
+                'role' => User::ROLE_OFFICE_ADMIN,
+            ]
+        );
+        $clientUser = User::updateOrCreate(
+            ['email' => 'client@example.test'],
+            [
+                'name' => 'Moe Thandar',
+                'phone' => '09 774 221 890',
+                'password' => Hash::make('password'),
+                'role' => User::ROLE_CLIENT,
+            ]
+        );
+        $riderUser = User::updateOrCreate(
+            ['email' => 'rider@example.test'],
+            [
+                'name' => 'Aung Kyaw',
+                'phone' => '09 772 883 120',
+                'password' => Hash::make('password'),
+                'role' => User::ROLE_RIDER,
+            ]
+        );
+
         $aungKyaw = Rider::updateOrCreate(
             ['code' => 'R-001'],
             [
+                'user_id' => $riderUser->id,
                 'name' => 'Aung Kyaw',
                 'phone' => '09 772 883 120',
                 'status' => 'busy',
@@ -56,6 +87,7 @@ class DeliveryDemoSeeder extends Seeder
         $pendingOrder = DeliveryOrder::updateOrCreate(
             ['code' => 'FD-240621'],
             [
+                'client_user_id' => $clientUser->id,
                 'client_name' => 'Moe Thandar',
                 'client_phone' => '09 774 221 890',
                 'pickup_contact_name' => 'Linn Fashion',
@@ -88,6 +120,7 @@ class DeliveryDemoSeeder extends Seeder
         $activeOrder = DeliveryOrder::updateOrCreate(
             ['code' => 'FD-240620'],
             [
+                'client_user_id' => $clientUser->id,
                 'client_name' => 'City Mart Express',
                 'client_phone' => '09 963 210 448',
                 'pickup_contact_name' => 'City Mart Counter 4',

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Icon } from "../icons";
 import { statusLabels } from "../data";
 
@@ -107,28 +108,7 @@ export function ThemeControl({ theme, setTheme, brand, setBrand }) {
   );
 }
 
-export function PortalSwitcher({ portal, setPortal }) {
-  return (
-    <div className="portal-switcher glass">
-      {[
-        ["client", "Client"],
-        ["rider", "Rider"],
-        ["admin", "Office"],
-      ].map(([value, label]) => (
-        <button
-          className={portal === value ? "active" : ""}
-          key={value}
-          onClick={() => setPortal(value)}
-          type="button"
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function MobileTopbar({ title, themeProps }) {
+export function MobileTopbar({ title, themeProps, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
       <Logo />
@@ -137,7 +117,7 @@ export function MobileTopbar({ title, themeProps }) {
         <ThemeControl {...themeProps} />
         <button aria-label="Notifications" className="icon-btn notification-btn" type="button">
           <Icon name="bell" />
-          <span />
+          {unreadCount > 0 && <span />}
         </button>
       </div>
     </header>
@@ -188,6 +168,36 @@ export function MobilePlaceholder({ icon, title }) {
       <span><Icon name={icon} size={23} /></span>
       <h2>{title}</h2>
       <p>This workspace is ready for the next MVP slice.</p>
+    </section>
+  );
+}
+
+export function NotificationList({ notifications = [], onRead, title = "Notifications" }) {
+  if (!notifications.length) {
+    return <MobilePlaceholder icon="bell" title={title} />;
+  }
+
+  return (
+    <section className="page-section">
+      <p className="eyebrow">ALERTS</p>
+      <h1>{title}</h1>
+      <div className="compact-list glass">
+        {notifications.map((notification) => (
+          <button
+            className={`compact-row notification-row ${notification.readAt ? "" : "unread"}`}
+            key={notification.id}
+            onClick={() => !notification.readAt && onRead?.(notification.id)}
+            type="button"
+          >
+            <span className="row-icon"><Icon name="bell" size={16} /></span>
+            <span className="row-content">
+              <strong>{notification.title}</strong>
+              <small>{notification.body}</small>
+              <small>{notification.orderCode} - {notification.createdAt}</small>
+            </span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }

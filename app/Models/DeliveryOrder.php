@@ -47,6 +47,7 @@ class DeliveryOrder extends Model
 
     protected $fillable = [
         'code',
+        'client_user_id',
         'client_name',
         'client_phone',
         'pickup_contact_name',
@@ -83,6 +84,8 @@ class DeliveryOrder extends Model
     ];
 
     protected $casts = [
+        'client_user_id' => 'integer',
+        'rider_id' => 'integer',
         'is_fragile' => 'boolean',
         'product_value' => 'decimal:2',
         'cod_amount' => 'decimal:2',
@@ -105,6 +108,11 @@ class DeliveryOrder extends Model
     public function rider(): BelongsTo
     {
         return $this->belongsTo(Rider::class);
+    }
+
+    public function clientUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'client_user_id');
     }
 
     public function statusHistories(): HasMany

@@ -25,6 +25,7 @@ class Rider extends Model
     ];
 
     protected $casts = [
+        'user_id' => 'integer',
         'last_active_at' => 'datetime',
         'cash_held' => 'decimal:2',
     ];

@@ -13,4 +13,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::view('/', 'app');
+Route::get('/', fn () => redirect()->route('client'));
+Route::view('/client', 'app', ['portal' => 'client'])->name('client');
+Route::view('/rider', 'app', ['portal' => 'rider'])->name('rider');
+Route::view('/office', 'app', ['portal' => 'admin'])->name('office');

@@ -1,11 +1,25 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+const apiConfig = {
+  baseUrl: import.meta.env.VITE_API_BASE_URL || "/api",
+  token: null,
+  onUnauthorized: null,
+};
+
+export function configureApi({ baseUrl, token, onUnauthorized } = {}) {
+  if (baseUrl) {
+    apiConfig.baseUrl = baseUrl;
+  }
+
+  apiConfig.token = token || null;
+  apiConfig.onUnauthorized = onUnauthorized || null;
+}
 
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${apiConfig.baseUrl}${path}`, {
     headers: {
       Accept: "application/json",
       ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...(apiConfig.token ? { Authorization: `Bearer ${apiConfig.token}` } : {}),
       ...options.headers,
     },
     ...options,
@@ -14,6 +28,14 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = new Error(`API request failed with status ${response.status}`);
     error.response = response;
+    try {
+      error.payload = await response.json();
+    } catch {
+      error.payload = null;
+    }
+    if (response.status === 401 && typeof apiConfig.onUnauthorized === "function") {
+      apiConfig.onUnauthorized();
+    }
     throw error;
   }
 
@@ -30,6 +52,56 @@ const initials = (name) =>
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+export async function login(credentials) {
+  return request("/auth/token", {
+    method: "POST",
+    body: JSON.stringify({ ...credentials, device_name: "FlowDrop web" }),
+  });
+}
+
+export async function registerClient(payload) {
+  return request("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, device_name: "FlowDrop web" }),
+  });
+}
+
+export async function fetchCurrentUser() {
+  return request("/user");
+}
+
+export async function logout() {
+  return request("/auth/logout", {
+    method: "POST",
+  });
+}
+
+export function mapNotification(notification) {
+  return {
+    id: notification.id,
+    title: notification.data?.title || "Delivery update",
+    body: notification.data?.body || "",
+    kind: notification.data?.kind || "activity",
+    orderCode: notification.data?.order_code || "",
+    status: notification.data?.status || null,
+    readAt: notification.read_at,
+    createdAt: notification.created_at ? new Date(notification.created_at).toLocaleString() : "Just now",
+  };
+}
+
+export async function fetchNotifications() {
+  const response = await request("/notifications?per_page=50");
+  return response.data.map(mapNotification);
+}
+
+export async function markNotificationRead(notificationId) {
+  const response = await request(`/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  });
+
+  return mapNotification(response);
+}
 
 export function mapOrder(order) {
   return {

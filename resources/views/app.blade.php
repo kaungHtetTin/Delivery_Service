@@ -13,6 +13,10 @@
         @vite('resources/js/main.jsx')
     </head>
     <body>
-        <div id="root"></div>
+        <div
+            id="root"
+            data-api-base-url="{{ url('/api') }}"
+            data-portal="{{ $portal ?? 'client' }}"
+        ></div>
     </body>
 </html>

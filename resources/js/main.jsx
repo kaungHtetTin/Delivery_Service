@@ -3,8 +3,10 @@ import { createRoot } from "react-dom/client";
 import DeliveryApp from "./DeliveryApp";
 import "./styles.css";
 
-createRoot(document.getElementById("root")).render(
+const root = document.getElementById("root");
+
+createRoot(root).render(
   <StrictMode>
-    <DeliveryApp />
+    <DeliveryApp apiBaseUrl={root.dataset.apiBaseUrl} initialPortal={root.dataset.portal} />
   </StrictMode>,
 );

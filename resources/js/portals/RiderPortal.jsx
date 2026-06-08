@@ -2,19 +2,31 @@ import { useState } from "react";
 import { Icon } from "../icons";
 import { money } from "../utils";
 import { nextRiderActions } from "../data";
-import { MobileNav, MobilePlaceholder, MobileTopbar, StatusBadge } from "../components/shared";
+import { AddressBlock, MobileNav, MobilePlaceholder, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
 
-export function RiderPortal({ orders, riders, progressOrder, themeProps }) {
+export function RiderPortal({ markNotificationRead, notifications = [], orders, riders, progressOrder, themeProps }) {
   const [page, setPage] = useState("jobs");
   const [selectedId, setSelectedId] = useState(null);
   const rider = riders[0];
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  if (!rider) {
+    return (
+      <div className="mobile-app rider-app">
+        <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
+        <main className="mobile-content">
+          <MobilePlaceholder icon="bike" title="No rider profile" />
+        </main>
+      </div>
+    );
+  }
+
   const riderOrders = orders.filter((order) => order.riderId === rider.id);
   const selectedOrder = orders.find((order) => order.id === selectedId);
 
   if (selectedOrder) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar themeProps={themeProps} />
+        <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
         <main className="mobile-content">
           <RiderJobDetail onBack={() => setSelectedId(null)} onProgress={progressOrder} order={selectedOrder} />
         </main>
@@ -23,12 +35,12 @@ export function RiderPortal({ orders, riders, progressOrder, themeProps }) {
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar themeProps={themeProps} />
+      <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
       <main className="mobile-content">
         {page === "jobs" && <RiderJobs onOpen={setSelectedId} orders={riderOrders} rider={rider} />}
         {page === "history" && <MobilePlaceholder icon="clock" title="Job history" />}
         {page === "gps" && <GpsStatus />}
-        {page === "notifications" && <MobilePlaceholder icon="bell" title="Notifications" />}
+        {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
         {page === "account" && <MobilePlaceholder icon="user" title="Rider account" />}
       </main>
       <MobileNav

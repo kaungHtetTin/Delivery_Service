@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AdminLog;
 use App\Models\Payment;
+use App\Notifications\OrderActivityNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -61,6 +62,7 @@ class PaymentController extends Controller
             $payment->deliveryOrder()->update([
                 'payment_status' => $validated['status'],
             ]);
+            $payment->load('deliveryOrder.clientUser');
 
             AdminLog::create([
                 'action' => 'payment_reviewed',
@@ -75,6 +77,16 @@ class PaymentController extends Controller
                 ],
                 'note' => $validated['note'] ?? null,
             ]);
+
+            $payment->deliveryOrder->clientUser?->notify(new OrderActivityNotification(
+                $payment->deliveryOrder,
+                'payment_reviewed',
+                $validated['status'] === 'paid' ? 'Payment approved' : 'Payment rejected',
+                $validated['status'] === 'paid'
+                    ? "Payment for {$payment->deliveryOrder->code} has been approved."
+                    : "Payment for {$payment->deliveryOrder->code} needs attention.",
+                ['payment_status' => $validated['status']]
+            ));
         });
 
         return response()->json($payment->fresh()->load('deliveryOrder.rider', 'deliveryOrder.payments'));

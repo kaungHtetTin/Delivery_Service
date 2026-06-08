@@ -27,6 +27,7 @@ const paths = {
   upload: "M12 16V4m0 0L8 8m4-4 4 4M5 14v5h14v-5",
   wallet: "M4 6h16v13H4V6Zm0 3h16m-4 5h.01",
   location: "M12 21s7-5.4 7-11A7 7 0 0 0 5 10c0 5.6 7 11 7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
+  lock: "M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5V11Zm7 4v2",
   menu: "M4 6h16M4 12h16M4 18h16",
 };
 
