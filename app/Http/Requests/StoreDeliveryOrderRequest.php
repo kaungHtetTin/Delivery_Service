@@ -25,6 +25,8 @@ class StoreDeliveryOrderRequest extends FormRequest
     {
         return [
             'client_name' => ['required', 'string', 'max:255'],
+            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
+            'shop_id' => ['nullable', 'integer', 'exists:shops,id'],
             'client_phone' => ['required', 'string', 'max:30'],
             'pickup_contact_name' => ['required', 'string', 'max:255'],
             'pickup_phone' => ['required', 'string', 'max:30'],
@@ -42,9 +44,7 @@ class StoreDeliveryOrderRequest extends FormRequest
             'product_value' => ['nullable', 'numeric', 'min:0'],
             'is_fragile' => ['nullable', 'boolean'],
             'special_handling_note' => ['nullable', 'string', 'max:1000'],
-            'delivery_fee_payment_method' => ['required', 'in:cash,cash_on_delivery,prepaid,mobile_banking'],
-            'product_payment_method' => ['required', 'in:already_paid,rider_collects,shop_collects_separately,mobile_banking'],
-            'cod_amount' => ['nullable', 'numeric', 'min:0'],
+            'delivery_fee_payment_method' => ['nullable', 'in:cash,cash_on_delivery,prepaid,mobile_banking'],
             'prepaid_amount' => ['nullable', 'numeric', 'min:0'],
             'delivery_fee' => ['nullable', 'numeric', 'min:0'],
             'client_note' => ['nullable', 'string', 'max:1000'],

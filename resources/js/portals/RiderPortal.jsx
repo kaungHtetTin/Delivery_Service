@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { Icon } from "../icons";
-import { money } from "../utils";
+import { deliveryFeeCashDue, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { nextRiderActions } from "../data";
 import { AddressBlock, MobileNav, MobilePlaceholder, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
 
-export function RiderPortal({ markNotificationRead, notifications = [], orders, riders, progressOrder, themeProps }) {
-  const [page, setPage] = useState("jobs");
-  const [selectedId, setSelectedId] = useState(null);
+const historyStatuses = new Set(["completed", "failed", "cancelled"]);
+
+export function RiderPortal({ appName, markNotificationRead, notifications = [], orders, riders, progressOrder, themeProps }) {
+  const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
+  const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   if (!rider) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
+        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
         <main className="mobile-content">
           <MobilePlaceholder icon="bike" title="No rider profile" />
         </main>
@@ -21,24 +23,28 @@ export function RiderPortal({ markNotificationRead, notifications = [], orders, 
   }
 
   const riderOrders = orders.filter((order) => order.riderId === rider.id);
-  const selectedOrder = orders.find((order) => order.id === selectedId);
+  const activeOrders = riderOrders.filter((order) => !historyStatuses.has(order.status));
+  const historyOrders = riderOrders.filter((order) => historyStatuses.has(order.status));
+  const selectedOrder = riderOrders.find((order) => order.id === selectedId);
 
   if (selectedOrder) {
+    const isHistory = historyStatuses.has(selectedOrder.status);
+
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
+        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
         <main className="mobile-content">
-          <RiderJobDetail onBack={() => setSelectedId(null)} onProgress={progressOrder} order={selectedOrder} />
+          <RiderJobDetail history={isHistory} onBack={() => setSelectedId(null)} onProgress={progressOrder} order={selectedOrder} />
         </main>
       </div>
     );
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar themeProps={themeProps} unreadCount={unreadCount} />
+      <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
       <main className="mobile-content">
-        {page === "jobs" && <RiderJobs onOpen={setSelectedId} orders={riderOrders} rider={rider} />}
-        {page === "history" && <MobilePlaceholder icon="clock" title="Job history" />}
+        {page === "jobs" && <RiderJobs onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
+        {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}
         {page === "gps" && <GpsStatus />}
         {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
         {page === "account" && <MobilePlaceholder icon="user" title="Rider account" />}
@@ -59,6 +65,8 @@ export function RiderPortal({ markNotificationRead, notifications = [], orders, 
 }
 
 function RiderJobs({ onOpen, orders, rider }) {
+  const expectedDeliveryFees = orders.reduce((total, order) => total + deliveryFeeCashDue(order), 0);
+
   return (
     <>
       <section className="rider-hero">
@@ -74,16 +82,19 @@ function RiderJobs({ onOpen, orders, rider }) {
       <section className="mini-metrics">
         <div className="glass"><small>ACTIVE JOBS</small><strong>{orders.length}</strong></div>
         <div className="glass"><small>CASH HELD</small><strong>{money(rider.cashHeld)}</strong></div>
+        <div className="glass"><small>FEES TO COLLECT</small><strong>{money(expectedDeliveryFees)}</strong></div>
+        <div className="glass"><small>PAY OFFICE</small><strong>{money(rider.cashHeld)}</strong></div>
       </section>
       <section className="section-block">
         <div className="section-heading"><div><span className="eyebrow">TODAY</span><h2>Active assignments</h2></div></div>
         <div className="delivery-list">
+          {orders.length === 0 && <MobilePlaceholder icon="box" title="No active assignments" />}
           {orders.map((order) => (
             <button className="delivery-list-card rider-job glass" key={order.id} onClick={() => onOpen(order.id)} type="button">
               <div className="card-row"><span className="order-code">{order.id}</span><StatusBadge status={order.status} /></div>
               <AddressBlock from={order.pickup} to={order.destination} />
               <div className="job-meta">
-                <span><Icon name="wallet" size={14} /> COD {money(order.cod)}</span>
+                <span><Icon name="wallet" size={14} /> Delivery fee {formatDeliveryFeeLabel(order)}</span>
                 <span><Icon name="clock" size={14} /> {order.updatedAt}</span>
               </div>
               <span className="btn primary full">View next action <Icon name="arrowRight" size={16} /></span>
@@ -95,13 +106,82 @@ function RiderJobs({ onOpen, orders, rider }) {
   );
 }
 
-function RiderJobDetail({ order, onBack, onProgress }) {
+function RiderHistory({ onOpen, orders }) {
+  const [filter, setFilter] = useStoredState("flowdrop.rider.historyFilter", "all");
+  const filteredOrders = filter === "all" ? orders : orders.filter((order) => order.status === filter);
+  const completedCount = orders.filter((order) => order.status === "completed").length;
+  const deliveryFeesTotal = filteredOrders.reduce((total, order) => total + deliveryFeeCashDue(order), 0);
+
+  return (
+    <section className="page-section">
+      <p className="eyebrow">PAST ASSIGNMENTS</p>
+      <h1>Job history</h1>
+      <section className="mini-metrics history-metrics">
+        <div className="glass"><small>TOTAL JOBS</small><strong>{orders.length}</strong></div>
+        <div className="glass"><small>COMPLETED</small><strong>{completedCount}</strong></div>
+        <div className="glass"><small>DELIVERY FEES</small><strong>{money(deliveryFeesTotal)}</strong></div>
+      </section>
+      <div className="filter-pills">
+        {[
+          ["all", "All"],
+          ["completed", "Completed"],
+          ["failed", "Failed"],
+          ["cancelled", "Cancelled"],
+        ].map(([value, label]) => (
+          <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)} type="button">{label}</button>
+        ))}
+      </div>
+      <div className="delivery-list">
+        {filteredOrders.length === 0 && <MobilePlaceholder icon="clock" title="No matching history" />}
+        {filteredOrders.map((order) => (
+          <button className="delivery-list-card rider-job glass" key={order.id} onClick={() => onOpen(order.id)} type="button">
+            <div className="card-row"><span className="order-code">{order.id}</span><StatusBadge status={order.status} /></div>
+            <AddressBlock from={order.pickup} to={order.destination} />
+            <div className="job-meta">
+              <span><Icon name="wallet" size={14} /> Delivery fee {formatDeliveryFeeLabel(order)}</span>
+              <span><Icon name="clock" size={14} /> {order.updatedAt}</span>
+            </div>
+            <span className="history-detail-link">View delivery details <Icon name="chevronRight" size={15} /></span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RiderJobDetail({ history = false, order, onBack, onProgress }) {
+  const [completing, setCompleting] = useState(false);
+  const [feeInput, setFeeInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const action = nextRiderActions[order.status];
+  const isCompleteStep = action?.[1] === "completed";
+
+  const handleAction = () => {
+    if (!action) {
+      return;
+    }
+
+    if (isCompleteStep) {
+      setCompleting(true);
+      return;
+    }
+
+    onProgress(order.id, action[1]);
+  };
+
+  const confirmComplete = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    await onProgress(order.id, "completed", Number(feeInput || 0));
+    setSubmitting(false);
+    setCompleting(false);
+  };
+
   return (
     <section className="page-section rider-detail">
-      <button className="back-btn" onClick={onBack} type="button"><Icon name="chevronLeft" size={17} /> Active assignments</button>
+      <button className="back-btn" onClick={onBack} type="button"><Icon name="chevronLeft" size={17} /> {history ? "Job history" : "Active assignments"}</button>
       <div className="card-row">
-        <div><p className="eyebrow">ACTIVE ASSIGNMENT</p><h1>{order.id}</h1></div>
+        <div><p className="eyebrow">{history ? "DELIVERY RECORD" : "ACTIVE ASSIGNMENT"}</p><h1>{order.id}</h1></div>
         <StatusBadge status={order.status} />
       </div>
       <section className="stop-card glass">
@@ -122,15 +202,59 @@ function RiderJobDetail({ order, onBack, onProgress }) {
       </section>
       <section className="order-summary glass">
         <div><small>PRODUCT</small><strong>{order.product}</strong></div>
-        <div><small>COD TO COLLECT</small><strong>{money(order.cod)}</strong></div>
+        <div><small>DELIVERY FEE</small><strong>{formatDeliveryFeeLabel(order)}</strong></div>
+        {history && <div><small>LAST UPDATED</small><strong>{order.updatedAt}</strong></div>}
         {order.fragile && <p className="warning-note">Fragile item - Handle with care</p>}
       </section>
-      <div className="sticky-actions glass">
-        <button className="btn secondary" type="button"><Icon name="more" size={16} /> Issue</button>
-        <button className="btn primary grow" disabled={!action} onClick={() => action && onProgress(order.id, action[1])} type="button">
-          {action ? action[0] : "Workflow complete"} <Icon name="arrowRight" size={16} />
-        </button>
-      </div>
+      {!history && isCompleteStep && (
+        <section className="cash-note glass">
+          <span><Icon name="wallet" size={18} /></span>
+          <div>
+            <strong>Collect delivery fee in cash</strong>
+            <small>Enter the final amount when you complete this order.</small>
+          </div>
+        </section>
+      )}
+      {!history && (
+        <div className="sticky-actions glass">
+          <button className="btn secondary" type="button"><Icon name="more" size={16} /> Issue</button>
+          <button className="btn primary grow" disabled={!action} onClick={handleAction} type="button">
+            {action ? action[0] : "Workflow complete"} <Icon name="arrowRight" size={16} />
+          </button>
+        </div>
+      )}
+      {completing && (
+        <div className="modal-backdrop">
+          <form className="operation-modal glass rider-complete-modal" onSubmit={confirmComplete}>
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">COMPLETE DELIVERY</p>
+                <h2>Final delivery fee</h2>
+              </div>
+              <button className="icon-btn" onClick={() => setCompleting(false)} type="button"><Icon name="close" /></button>
+            </div>
+            <p className="muted">Enter the cash amount collected from the client for this delivery.</p>
+            <label className="field-label">Delivery fee (MMK)</label>
+            <input
+              autoFocus
+              className="text-input"
+              inputMode="numeric"
+              min="0"
+              onChange={(event) => setFeeInput(event.target.value)}
+              placeholder="e.g. 3000"
+              required
+              type="number"
+              value={feeInput}
+            />
+            <div className="modal-actions">
+              <button className="btn secondary" onClick={() => setCompleting(false)} type="button">Cancel</button>
+              <button className="btn primary grow" disabled={submitting} type="submit">
+                {submitting ? "Saving..." : "Complete order"} <Icon name="check" size={16} />
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }

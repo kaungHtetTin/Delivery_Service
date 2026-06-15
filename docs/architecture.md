@@ -48,6 +48,9 @@ Current foundation:
 * Guarded rider workflow status updates
 * Rider list and active assignment list
 * Rider GPS location reporting
+* Admin CRUD for users, customers, shops, system settings, pricing rules, orders, riders, payments, and cash collections
+* Saved customer/shop records linked to delivery orders
+* Default pricing-rule calculation for delivery fees
 * SQLite local environment and demo seed data
 * Feature tests for request creation, assignment, workflow guards, and GPS reporting
 

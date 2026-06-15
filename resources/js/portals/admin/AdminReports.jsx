@@ -6,8 +6,8 @@ export function AdminReports({ orders, reportData, riders }) {
     totalOrders: orders.length,
     activeOrders: orders.filter((order) => activeStatuses.has(order.status)).length,
     completedOrders: orders.filter((order) => order.status === "completed").length,
-    pendingPayments: orders.filter((order) => order.paymentStatus === "pending_approval").length,
-    approvedAmount: orders
+    unpaidFees: orders.filter((order) => order.paymentStatus === "unpaid").length,
+    deliveryFeesCollected: orders
       .filter((order) => order.paymentStatus === "paid")
       .reduce((total, order) => total + Number(order.fee || 0), 0),
   };
@@ -15,9 +15,10 @@ export function AdminReports({ orders, reportData, riders }) {
     totalOrders: reportData?.orders?.total ?? localSummary.totalOrders,
     activeOrders: reportData?.orders?.active ?? localSummary.activeOrders,
     completedOrders: reportData?.orders?.completed ?? localSummary.completedOrders,
-    pendingPayments: reportData?.payments?.pending_approval ?? localSummary.pendingPayments,
-    approvedAmount: reportData?.payments?.approved_amount ?? localSummary.approvedAmount,
-    cashCollected: reportData?.cash_collections?.total_collected ?? riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0),
+    unpaidFees: localSummary.unpaidFees,
+    deliveryFeesCollected: reportData?.cash_collections?.total_collected ?? localSummary.deliveryFeesCollected,
+    cashHeld: reportData?.riders?.reduce((total, rider) => total + Number(rider.cash_held || 0), 0)
+      ?? riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0),
   };
   const riderRows = reportData?.riders || riders.map((rider) => ({
     code: rider.id,
@@ -35,9 +36,9 @@ export function AdminReports({ orders, reportData, riders }) {
         <ReportMetric label="Total orders" value={summary.totalOrders} />
         <ReportMetric label="Active deliveries" value={summary.activeOrders} />
         <ReportMetric label="Completed" value={summary.completedOrders} />
-        <ReportMetric label="Pending payments" value={summary.pendingPayments} />
-        <ReportMetric label="Approved payments" value={money(summary.approvedAmount)} />
-        <ReportMetric label="Cash collected" value={money(summary.cashCollected)} />
+        <ReportMetric label="Unpaid delivery fees" value={summary.unpaidFees} />
+        <ReportMetric label="Delivery fees collected" value={money(summary.deliveryFeesCollected)} />
+        <ReportMetric label="Cash held by riders" value={money(summary.cashHeld)} />
       </div>
       <div className="panel glass">
         <div className="panel-heading">
@@ -45,7 +46,7 @@ export function AdminReports({ orders, reportData, riders }) {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Rider</th><th>Status</th><th>Area</th><th>Active</th><th>Completed</th><th>Cash held</th></tr></thead>
+            <thead><tr><th>Rider</th><th>Status</th><th>Area</th><th>Active</th><th>Completed</th><th>Delivery fees held</th></tr></thead>
             <tbody>
               {riderRows.map((rider) => (
                 <tr key={rider.code}>

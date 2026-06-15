@@ -13,6 +13,8 @@ The application includes:
 * Shared compact glass-like visual system
 * Laravel API hydration with local browser persistence as an offline prototype fallback
 * Laravel delivery order APIs, riders, status histories, GPS reporting, payments, COD collections, seed data, and feature tests
+* Admin management CRUD for users, customers, shops, system settings, pricing rules, orders, riders, payments, and cash collections
+* Saved customer/shop references on delivery orders and default pricing-rule fee calculation
 
 ## Run Locally
 

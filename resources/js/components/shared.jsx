@@ -24,7 +24,7 @@ export function StatusBadge({ status }) {
   );
 }
 
-export function Logo({ compact = false }) {
+export function Logo({ appName = "FlowDrop", compact = false }) {
   return (
     <div className="logo">
       <span className="logo-mark">
@@ -32,7 +32,7 @@ export function Logo({ compact = false }) {
       </span>
       {!compact && (
         <span>
-          <strong>FlowDrop</strong>
+          <strong>{appName}</strong>
           <small>DELIVERY</small>
         </span>
       )}
@@ -108,10 +108,10 @@ export function ThemeControl({ theme, setTheme, brand, setBrand }) {
   );
 }
 
-export function MobileTopbar({ title, themeProps, unreadCount = 0 }) {
+export function MobileTopbar({ appName, title, themeProps, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
-      <Logo />
+      <Logo appName={appName} />
       {title && <span className="topbar-title">{title}</span>}
       <div className="topbar-actions">
         <ThemeControl {...themeProps} />
@@ -162,19 +162,29 @@ export function AddressBlock({ from, to }) {
   );
 }
 
-export function MobilePlaceholder({ icon, title }) {
+export function MobilePlaceholder({ icon, message = "Nothing to show here yet.", title }) {
   return (
     <section className="placeholder">
       <span><Icon name={icon} size={23} /></span>
       <h2>{title}</h2>
-      <p>This workspace is ready for the next MVP slice.</p>
+      <p>{message}</p>
     </section>
   );
 }
 
 export function NotificationList({ notifications = [], onRead, title = "Notifications" }) {
   if (!notifications.length) {
-    return <MobilePlaceholder icon="bell" title={title} />;
+    return (
+      <section className="page-section">
+        <p className="eyebrow">ALERTS</p>
+        <h1>{title}</h1>
+        <div className="placeholder compact-placeholder glass">
+          <span><Icon name="bell" size={23} /></span>
+          <h2>No alerts yet</h2>
+          <p>Delivery updates will appear here when your order is reviewed, a rider is assigned, or the delivery status changes.</p>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -200,4 +210,31 @@ export function NotificationList({ notifications = [], onRead, title = "Notifica
       </div>
     </section>
   );
+}
+
+export function CreatorSourceBadge({ type = "office" }) {
+  const isClient = type === "client";
+
+  return (
+    <span className={`creator-source-badge ${isClient ? "client" : "office"}`}>
+      <Icon name={isClient ? "user" : "settings"} size={12} />
+      {isClient ? "Client" : "Office"}
+    </span>
+  );
+}
+
+export function formatOrderCreator(order) {
+  const isClient = order.creatorType === "client";
+
+  return {
+    isClient,
+    badge: isClient ? "client" : "office",
+    title: isClient ? order.creatorAccountName || order.client : order.client,
+    meta: isClient
+      ? [order.creatorAccountPhone || order.clientPhone, order.creatorAccountEmail].filter(Boolean).join(" · ")
+      : "Entered manually by office staff",
+    accountName: order.creatorAccountName || "",
+    requesterName: order.client,
+    requesterPhone: order.clientPhone,
+  };
 }

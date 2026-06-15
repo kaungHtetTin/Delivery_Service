@@ -92,6 +92,13 @@ Build a practical, MVP-first delivery management platform for local businesses w
 - Input validation and file upload security
 - Role management and branch support
 
+### Current Progress
+
+- Implemented admin CRUD for users, customers, shops, system settings, pricing rules, orders, riders, payments, and cash collections.
+- Delivery orders can link to saved customer/shop records.
+- Default pricing rules can calculate delivery fees for new orders.
+- Branch support remains future scope.
+
 ### Workstreams
 
 - Search and filter UI for orders

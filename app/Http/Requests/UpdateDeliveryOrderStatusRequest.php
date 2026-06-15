@@ -27,6 +27,12 @@ class UpdateDeliveryOrderStatusRequest extends FormRequest
     {
         return [
             'status' => ['required', Rule::in(DeliveryOrder::STATUSES)],
+            'delivery_fee' => [
+                Rule::requiredIf(fn () => $this->input('status') === 'completed'),
+                'nullable',
+                'numeric',
+                'min:0',
+            ],
             'note' => ['nullable', 'string', 'max:1000'],
             'actor_type' => ['nullable', 'string', 'max:100'],
             'actor_id' => ['nullable', 'integer', 'min:1'],

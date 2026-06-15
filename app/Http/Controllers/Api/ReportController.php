@@ -44,7 +44,7 @@ class ReportController extends Controller
                 'approved_amount' => (float) (clone $payments)->where('status', 'paid')->sum('amount'),
             ],
             'cash_collections' => [
-                'total_collected' => (float) (clone $cashCollections)->sum('total_cash_collected'),
+                'total_collected' => (float) (clone $cashCollections)->sum('delivery_fee_collected'),
                 'confirmed' => (clone $cashCollections)->whereNotNull('confirmed_at')->count(),
             ],
             'riders' => Rider::query()
