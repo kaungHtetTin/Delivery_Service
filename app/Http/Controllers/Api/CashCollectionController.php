@@ -19,7 +19,11 @@ class CashCollectionController extends Controller
             ->with(['deliveryOrder', 'rider'])
             ->when($request->integer('rider_id'), fn ($query, $riderId) => $query->where('rider_id', $riderId))
             ->when($request->integer('delivery_order_id'), fn ($query, $orderId) => $query->where('delivery_order_id', $orderId))
-            ->when($request->boolean('confirmed'), fn ($query) => $query->whereNotNull('confirmed_at'))
+            ->when($request->has('confirmed'), function ($query) use ($request) {
+                $request->boolean('confirmed')
+                    ? $query->whereNotNull('confirmed_at')
+                    : $query->whereNull('confirmed_at');
+            })
             ->latest()
             ->paginate($request->integer('per_page', 25));
 

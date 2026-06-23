@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 
 export const money = (amount) => `${Number(amount || 0).toLocaleString()} MMK`;
 
+export const currentDateLabel = () =>
+  new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  }).toUpperCase();
+
 export const activeStatuses = new Set([
   "rider_assigned",
   "rider_accepted",

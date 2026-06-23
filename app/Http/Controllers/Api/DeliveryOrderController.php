@@ -101,10 +101,12 @@ class DeliveryOrderController extends Controller
                 $attributes['shop_id'] ??= $shop->id;
             }
 
-            $attributes['delivery_fee_payment_method'] = $attributes['delivery_fee_payment_method'] ?? 'cash_on_delivery';
+            $attributes['delivery_fee_payment_method'] = $attributes['delivery_fee_payment_method'] ?? 'cash';
             $attributes['delivery_fee'] = $attributes['delivery_fee'] ?? 0;
-            $attributes['cod_amount'] = 0;
-            $attributes['product_payment_method'] = 'already_paid';
+            $attributes['product_payment_method'] = $attributes['product_payment_method'] ?? 'already_paid';
+            $attributes['cod_amount'] = $attributes['product_payment_method'] === 'rider_collects'
+                ? ($attributes['cod_amount'] ?? 0)
+                : 0;
             $attributes['payment_status'] = 'unpaid';
 
             $order = DeliveryOrder::create($attributes);
@@ -138,38 +140,16 @@ class DeliveryOrderController extends Controller
 
     public function update(Request $request, DeliveryOrder $deliveryOrder): JsonResponse
     {
-        $validated = $request->validate([
-            'client_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
-            'shop_id' => ['nullable', 'integer', 'exists:shops,id'],
-            'client_phone' => ['sometimes', 'required', 'string', 'max:30'],
-            'pickup_contact_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'pickup_phone' => ['sometimes', 'required', 'string', 'max:30'],
-            'pickup_address' => ['sometimes', 'required', 'string', 'max:1000'],
-            'pickup_latitude' => ['nullable', 'numeric', 'between:-90,90'],
-            'pickup_longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'receiver_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'receiver_phone' => ['sometimes', 'required', 'string', 'max:30'],
-            'receiver_address' => ['sometimes', 'required', 'string', 'max:1000'],
-            'receiver_latitude' => ['nullable', 'numeric', 'between:-90,90'],
-            'receiver_longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'product_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'product_category' => ['nullable', 'string', 'max:100'],
-            'quantity' => ['nullable', 'integer', 'min:1', 'max:999'],
-            'product_value' => ['nullable', 'numeric', 'min:0'],
-            'is_fragile' => ['nullable', 'boolean'],
-            'special_handling_note' => ['nullable', 'string', 'max:1000'],
-            'delivery_fee_payment_method' => ['sometimes', 'required', 'in:cash,cash_on_delivery,prepaid,mobile_banking'],
-            'product_payment_method' => ['sometimes', 'required', 'in:already_paid,rider_collects,shop_collects_separately,mobile_banking'],
-            'cod_amount' => ['nullable', 'numeric', 'min:0'],
-            'prepaid_amount' => ['nullable', 'numeric', 'min:0'],
-            'delivery_fee' => ['nullable', 'numeric', 'min:0'],
-            'payment_status' => ['sometimes', 'required', 'in:unpaid,pending_approval,paid,rejected,refunded'],
-            'status' => ['sometimes', 'required', 'in:' . implode(',', DeliveryOrder::STATUSES)],
-            'rider_id' => ['nullable', 'integer', 'exists:riders,id'],
-            'client_note' => ['nullable', 'string', 'max:1000'],
-            'internal_note' => ['nullable', 'string', 'max:1000'],
-        ]);
+        $isClient = $request->user()?->role === User::ROLE_CLIENT;
+
+        if ($isClient) {
+            $this->authorizeClientPendingOrder($request, $deliveryOrder);
+        }
+
+        $validated = $request->validate($isClient
+            ? $this->clientUpdateRules()
+            : $this->officeUpdateRules()
+        );
 
         if (array_key_exists('product_payment_method', $validated) && $validated['product_payment_method'] === 'already_paid') {
             $validated['cod_amount'] = 0;
@@ -184,7 +164,7 @@ class DeliveryOrderController extends Controller
             if (array_key_exists('status', $validated) && $validated['status'] !== $previousStatus) {
                 $deliveryOrder->statusHistories()->create([
                     'status' => $validated['status'],
-                    'actor_type' => 'office_admin',
+                    'actor_type' => $request->user()?->role,
                     'actor_id' => $request->user()?->id,
                     'note' => $validated['internal_note'] ?? null,
                     'metadata' => ['previous_status' => $previousStatus],
@@ -195,7 +175,7 @@ class DeliveryOrderController extends Controller
                 'action' => 'delivery_order_updated',
                 'subject_type' => DeliveryOrder::class,
                 'subject_id' => $deliveryOrder->id,
-                'actor_type' => 'office_admin',
+                'actor_type' => $request->user()?->role,
                 'actor_id' => $request->user()?->id,
                 'metadata' => [
                     'previous' => $previous,
@@ -209,6 +189,10 @@ class DeliveryOrderController extends Controller
 
     public function destroy(Request $request, DeliveryOrder $deliveryOrder): JsonResponse
     {
+        if ($request->user()?->role === User::ROLE_CLIENT) {
+            $this->authorizeClientPendingOrder($request, $deliveryOrder);
+        }
+
         $rider = $deliveryOrder->rider;
         $snapshot = $deliveryOrder->only([
             'code',
@@ -231,7 +215,7 @@ class DeliveryOrderController extends Controller
                 'action' => 'delivery_order_deleted',
                 'subject_type' => DeliveryOrder::class,
                 'subject_id' => $id,
-                'actor_type' => 'office_admin',
+                'actor_type' => $request->user()?->role,
                 'actor_id' => $request->user()?->id,
                 'metadata' => $snapshot,
             ]);
@@ -320,6 +304,14 @@ class DeliveryOrderController extends Controller
         UpdateDeliveryOrderStatusRequest $request,
         DeliveryOrder $deliveryOrder
     ): JsonResponse {
+        if ($request->user()?->role === User::ROLE_RIDER) {
+            $deliveryOrder->loadMissing('rider');
+
+            if ((int) $deliveryOrder->rider?->user_id !== (int) $request->user()->id) {
+                abort(403, 'You can only update orders assigned to your rider account.');
+            }
+        }
+
         $validated = $request->validated();
         $status = $validated['status'];
 
@@ -398,6 +390,85 @@ class DeliveryOrderController extends Controller
         if (! $hasOtherActiveOrders) {
             $rider->update(['status' => 'available']);
         }
+    }
+
+    private function authorizeClientPendingOrder(Request $request, DeliveryOrder $deliveryOrder): void
+    {
+        if ((int) $deliveryOrder->client_user_id !== (int) $request->user()?->id) {
+            abort(403, 'You can only change your own delivery requests.');
+        }
+
+        if ($deliveryOrder->status !== 'pending') {
+            throw ValidationException::withMessages([
+                'order' => 'This delivery request can no longer be edited or deleted after office review starts.',
+            ]);
+        }
+    }
+
+    private function clientUpdateRules(): array
+    {
+        return [
+            'client_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'client_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'pickup_contact_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'pickup_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'pickup_address' => ['sometimes', 'required', 'string', 'max:1000'],
+            'pickup_latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'pickup_longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'receiver_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'receiver_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'receiver_address' => ['sometimes', 'required', 'string', 'max:1000'],
+            'receiver_latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'receiver_longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'product_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'product_category' => ['nullable', 'string', 'max:100'],
+            'quantity' => ['nullable', 'integer', 'min:1', 'max:999'],
+            'product_value' => ['nullable', 'numeric', 'min:0'],
+            'is_fragile' => ['nullable', 'boolean'],
+            'special_handling_note' => ['nullable', 'string', 'max:1000'],
+            'delivery_fee_payment_method' => ['sometimes', 'required', 'in:cash,mobile_banking'],
+            'product_payment_method' => ['nullable', 'in:already_paid,rider_collects'],
+            'cod_amount' => ['nullable', 'numeric', 'min:0'],
+            'prepaid_amount' => ['nullable', 'numeric', 'min:0'],
+            'delivery_fee' => ['nullable', 'numeric', 'min:0'],
+            'client_note' => ['nullable', 'string', 'max:1000'],
+        ];
+    }
+
+    private function officeUpdateRules(): array
+    {
+        return [
+            'client_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
+            'shop_id' => ['nullable', 'integer', 'exists:shops,id'],
+            'client_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'pickup_contact_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'pickup_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'pickup_address' => ['sometimes', 'required', 'string', 'max:1000'],
+            'pickup_latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'pickup_longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'receiver_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'receiver_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'receiver_address' => ['sometimes', 'required', 'string', 'max:1000'],
+            'receiver_latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'receiver_longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'product_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'product_category' => ['nullable', 'string', 'max:100'],
+            'quantity' => ['nullable', 'integer', 'min:1', 'max:999'],
+            'product_value' => ['nullable', 'numeric', 'min:0'],
+            'is_fragile' => ['nullable', 'boolean'],
+            'special_handling_note' => ['nullable', 'string', 'max:1000'],
+            'delivery_fee_payment_method' => ['sometimes', 'required', 'in:cash,mobile_banking'],
+            'product_payment_method' => ['sometimes', 'required', 'in:already_paid,rider_collects,shop_collects_separately,mobile_banking'],
+            'cod_amount' => ['nullable', 'numeric', 'min:0'],
+            'prepaid_amount' => ['nullable', 'numeric', 'min:0'],
+            'delivery_fee' => ['nullable', 'numeric', 'min:0'],
+            'payment_status' => ['sometimes', 'required', 'in:unpaid,pending_approval,paid,rejected,refunded'],
+            'status' => ['sometimes', 'required', 'in:' . implode(',', DeliveryOrder::STATUSES)],
+            'rider_id' => ['nullable', 'integer', 'exists:riders,id'],
+            'client_note' => ['nullable', 'string', 'max:1000'],
+            'internal_note' => ['nullable', 'string', 'max:1000'],
+        ];
     }
 
     private function notifyClient(DeliveryOrder $order, string $kind, string $title, string $body, array $meta = []): void

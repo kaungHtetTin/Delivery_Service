@@ -38,14 +38,19 @@ class ReportController extends Controller
                 'cancelled' => (clone $orders)->where('status', 'cancelled')->count(),
             ],
             'payments' => [
+                'unpaid' => (clone $payments)->where('status', 'unpaid')->count(),
                 'pending_approval' => (clone $payments)->where('status', 'pending_approval')->count(),
                 'paid' => (clone $payments)->where('status', 'paid')->count(),
                 'rejected' => (clone $payments)->where('status', 'rejected')->count(),
+                'refunded' => (clone $payments)->where('status', 'refunded')->count(),
                 'approved_amount' => (float) (clone $payments)->where('status', 'paid')->sum('amount'),
             ],
             'cash_collections' => [
                 'total_collected' => (float) (clone $cashCollections)->sum('delivery_fee_collected'),
+                'confirmed_amount' => (float) (clone $cashCollections)->whereNotNull('confirmed_at')->sum('delivery_fee_collected'),
+                'pending_amount' => (float) (clone $cashCollections)->whereNull('confirmed_at')->sum('delivery_fee_collected'),
                 'confirmed' => (clone $cashCollections)->whereNotNull('confirmed_at')->count(),
+                'pending' => (clone $cashCollections)->whereNull('confirmed_at')->count(),
             ],
             'riders' => Rider::query()
                 ->withCount([

@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Icon } from "../icons";
 import { formatSettingValue, searchCustomers, searchShops, settingValueForInput } from "../api";
 import { activeStatuses, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
@@ -75,13 +75,14 @@ export function AdminPortal({
     [riderFilters, riders],
   );
   const totalCashHeld = riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0);
+  const totalCollectedFees = cashCollections.reduce((total, collection) => total + Number(collection.totalCashCollected || 0), 0);
   const currentOperationOrders = orders.filter((order) => !["completed", "failed", "cancelled"].includes(order.status));
   const stats = [
-    ["New requests", orders.filter((order) => order.status === "pending").length, "box", "+2 since 9 AM"],
+    ["New requests", orders.filter((order) => order.status === "pending").length, "box", "Waiting for review"],
     ["Active deliveries", orders.filter((order) => activeStatuses.has(order.status)).length, "navigation", "Live operations"],
     ["Available riders", riders.filter((rider) => rider.status === "available").length, "bike", `${riders.length} total riders`],
     ["Cash held", money(totalCashHeld), "wallet", "Delivery fees with riders"],
-    ["Today's income", "86,500", "chart", "MMK collected"],
+    ["Collected fees", money(totalCollectedFees), "chart", "Recorded collections"],
   ];
   const nav = [
     ["dashboard", "grid", "Dashboard"],
@@ -109,7 +110,17 @@ export function AdminPortal({
       </aside>
       <main className="admin-main">
         <header className="admin-topbar glass">
-          <div className="global-search"><Icon name="search" size={17} /><input placeholder="Search order, rider, phone..." /></div>
+          <div className="global-search">
+            <Icon name="search" size={17} />
+            <input
+              onChange={(event) => {
+                setOrderFilters((current) => ({ ...current, search: event.target.value }));
+                setPage("orders");
+              }}
+              placeholder="Search order, creator, phone..."
+              value={orderFilters.search}
+            />
+          </div>
           <div className="topbar-actions">
             <ThemeControl {...themeProps} />
             <button className="icon-btn notification-btn" type="button"><Icon name="bell" /><span /></button>
@@ -133,15 +144,15 @@ export function AdminPortal({
                   <CurrentAddressBoard orders={currentOperationOrders} selectOrder={setSelectedOrderId} />
                 </div>
                 <div className="panel wide glass">
-                  <PanelHeading title="Live order queue" eyebrow="OPERATIONS" action="View all orders" />
+                  <PanelHeading title="Live order queue" eyebrow="OPERATIONS" action="View all orders" onAction={() => setPage("orders")} />
                   <OrderTable onDelete={removeOrder} onEdit={(order) => setOrderEditor(order)} orders={currentOperationOrders} riders={riders} selectOrder={setSelectedOrderId} />
                 </div>
                 <div className="panel glass">
-                  <PanelHeading title="Rider availability" eyebrow="TEAM STATUS" action="View riders" />
+                  <PanelHeading title="Rider availability" eyebrow="TEAM STATUS" action="View riders" onAction={() => setPage("riders")} />
                   <RiderSummary riders={riders} />
                 </div>
                 <div className="panel map-panel glass">
-                  <PanelHeading title="Live rider map" eyebrow="LOCATION" action="Open tracking map" />
+                  <PanelHeading title="Live rider map" eyebrow="LOCATION" action="Open tracking map" onAction={() => setPage("tracking")} />
                   <AdminMap riders={riders} />
                 </div>
                 <div className="panel glass">
@@ -161,14 +172,14 @@ export function AdminPortal({
                 <CurrentAddressBoard orders={currentOperationOrders} selectOrder={setSelectedOrderId} />
               </div>
               <div className="panel glass">
-                <PanelHeading title="All delivery orders" eyebrow="ORDER MANAGEMENT" action="Export" />
+                <PanelHeading title="All delivery orders" eyebrow="ORDER MANAGEMENT" action="Export" onAction={() => exportOrdersCsv(filteredOrders)} />
                 <OrderFilters filters={orderFilters} onChange={setOrderFilters} riders={riders} />
                 <OrderTable onDelete={removeOrder} onEdit={(order) => setOrderEditor(order)} orders={filteredOrders} riders={riders} selectOrder={setSelectedOrderId} />
               </div>
             </section>
           )}
           {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} riders={filteredRiders} />}
-          {activePage === "cash" && <CashCollectionsAdmin collections={cashCollections} onDelete={removeCashCollection} onEdit={(collection) => setCashEditor(collection)} onNew={() => setCashEditor({})} orders={orders} riders={riders} />}
+          {activePage === "cash" && <CashCollectionsAdmin collections={cashCollections} onConfirm={(collection) => saveCashCollection({ ...collection, confirmed: true })} onDelete={removeCashCollection} onEdit={(collection) => setCashEditor(collection)} onNew={() => setCashEditor({})} orders={orders} riders={riders} />}
           {activePage === "users" && <UsersAdmin onDelete={removeUser} onEdit={(user) => setUserEditor(user)} onNew={() => setUserEditor({})} users={users} />}
           {activePage === "settings" && <SettingsAdmin onDelete={removeSetting} onEdit={(setting) => setSettingEditor(setting)} onNew={() => setSettingEditor({})} settings={settings} />}
           {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap riders={riders} large /></section>}
@@ -238,18 +249,50 @@ export function AdminPortal({
   );
 }
 
-function PanelHeading({ eyebrow, title, action }) {
+function PanelHeading({ eyebrow, title, action, onAction }) {
   return (
     <div className="panel-heading">
       <div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div>
-      {action && <button className="text-btn" type="button">{action}</button>}
+      {action && <button className="text-btn" onClick={onAction} type="button">{action}</button>}
     </div>
   );
 }
 
+function exportOrdersCsv(orders) {
+  const columns = [
+    ["Order", (order) => order.id],
+    ["Created at", (order) => order.createdAt],
+    ["Created by", (order) => formatOrderCreator(order).title],
+    ["Creator type", (order) => formatOrderCreator(order).badge],
+    ["Requester phone", (order) => order.clientPhone],
+    ["Receiver", (order) => order.receiver],
+    ["Receiver phone", (order) => order.receiverPhone],
+    ["Pickup", (order) => order.pickup],
+    ["Delivery address", (order) => order.destination],
+    ["Status", (order) => order.status],
+    ["Fee status", (order) => order.paymentStatus],
+    ["Rider", (order) => order.riderId || "Unassigned"],
+    ["Delivery fee", (order) => order.fee],
+    ["Product COD", (order) => (order.codEnabled ? "On" : "Off")],
+    ["COD amount", (order) => order.cod || 0],
+  ];
+  const escapeCell = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const rows = [
+    columns.map(([header]) => escapeCell(header)).join(","),
+    ...orders.map((order) => columns.map(([, value]) => escapeCell(value(order))).join(",")),
+  ];
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `flowdrop-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function OrderFilters({ filters, onChange, riders }) {
   const statuses = ["pending", "approved", "rider_assigned", "going_to_pickup", "picked_up", "delivered", "completed", "failed", "cancelled"];
-  const paymentStatuses = ["unpaid", "paid"];
+  const paymentStatuses = ["unpaid", "pending_approval", "paid", "rejected", "refunded"];
   const update = (key, value) => onChange({ ...filters, [key]: value });
 
   return (
@@ -285,7 +328,7 @@ function OrderTable({ onDelete, onEdit, orders, riders, selectOrder }) {
                 <td><strong>{order.id}</strong><small>{order.createdAt}</small></td>
                 <td>
                   <div className="creator-cell">
-                    <CreatorSourceBadge type={creator.badge} />
+                    <CreatorSourceBadge compact type={creator.badge} />
                     <span>
                       <strong>{creator.title}</strong>
                       <small>{creator.meta}</small>
@@ -331,6 +374,7 @@ function OrderTable({ onDelete, onEdit, orders, riders, selectOrder }) {
           })}
         </tbody>
       </table>
+      {orders.length === 0 && <p className="muted table-empty">No delivery orders match the current filters.</p>}
     </div>
   );
 }
@@ -356,7 +400,7 @@ function CurrentAddressBoard({ orders, selectOrder }) {
               <td><strong>{order.id}</strong><small>{order.createdAt}</small></td>
               <td>
                 <div className="creator-cell">
-                  <CreatorSourceBadge type={creator.badge} />
+                  <CreatorSourceBadge compact type={creator.badge} />
                   <span>
                     <strong>{creator.title}</strong>
                     <small>{creator.meta}</small>
@@ -429,25 +473,65 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, riders 
   );
 }
 
-function CashCollectionsAdmin({ collections, onDelete, onEdit, onNew, orders, riders }) {
+function CashCollectionsAdmin({ collections, onConfirm, onDelete, onEdit, onNew, orders, riders }) {
+  const [filters, setFilters] = useState({ status: "all", riderId: "all" });
+  const filteredCollections = collections.filter((collection) => (
+    (filters.status === "all" ||
+      (filters.status === "confirmed" && collection.confirmedAt) ||
+      (filters.status === "pending" && !collection.confirmedAt)) &&
+    (filters.riderId === "all" || String(collection.riderApiId) === String(filters.riderId))
+  ));
+  const totalCollected = filteredCollections.reduce((total, collection) => total + Number(collection.totalCashCollected || 0), 0);
+  const pendingCount = collections.filter((collection) => !collection.confirmedAt).length;
+  const confirmedCount = collections.filter((collection) => collection.confirmedAt).length;
+  const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+
   return (
     <section className="panel glass">
       <div className="panel-heading">
         <div><p className="eyebrow">CASH COLLECTIONS</p><h2>Delivery fee collections</h2></div>
         <button className="btn primary" onClick={onNew} type="button"><Icon name="plus" size={16} /> Record cash</button>
       </div>
+      <div className="cash-summary-grid">
+        <div className="glass"><small>VISIBLE TOTAL</small><strong>{money(totalCollected)}</strong></div>
+        <div className="glass"><small>PENDING</small><strong>{pendingCount}</strong></div>
+        <div className="glass"><small>CONFIRMED</small><strong>{confirmedCount}</strong></div>
+      </div>
+      <div className="filter-toolbar cash-filters">
+        <div className="search-box"><Icon name="wallet" size={16} /><input disabled value={`${filteredCollections.length} collection records`} /></div>
+        <select onChange={(event) => update("status", event.target.value)} value={filters.status}>
+          <option value="all">All confirmation states</option>
+          <option value="pending">Pending confirmation</option>
+          <option value="confirmed">Confirmed only</option>
+        </select>
+        <select onChange={(event) => update("riderId", event.target.value)} value={filters.riderId}>
+          <option value="all">All riders</option>
+          {riders.map((rider) => <option key={rider._apiId} value={rider._apiId}>{rider.name}</option>)}
+        </select>
+      </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Order</th><th>Rider</th><th>Delivery fee</th><th>Confirmed</th><th /></tr></thead>
+          <thead><tr><th>Order</th><th>Rider</th><th>Delivery fee</th><th>Note</th><th>Confirmed</th><th /></tr></thead>
           <tbody>
-            {collections.map((collection) => (
+            {filteredCollections.map((collection) => (
               <tr key={collection.id}>
                 <td><strong>{collection.orderCode}</strong><small>{collection.createdAt}</small></td>
                 <td>{collection.riderName || riders.find((rider) => rider._apiId === collection.riderApiId)?.name || "Unassigned"}</td>
                 <td><strong>{money(collection.deliveryFeeCollected)}</strong></td>
-                <td>{collection.confirmedAt || <span className="muted">Pending</span>}</td>
+                <td>{collection.paymentNote || <span className="muted">No note</span>}</td>
+                <td>{collection.confirmedAt ? <StatusBadge status="confirmed" /> : <StatusBadge status="pending" />}{collection.confirmedAt && <small>{collection.confirmedAt}</small>}</td>
                 <td>
                   <div className="inline-actions">
+                    {!collection.confirmedAt && (
+                      <button
+                        className="icon-btn small"
+                        onClick={() => onConfirm(collection)}
+                        title="Confirm collection"
+                        type="button"
+                      >
+                        <Icon name="check" size={15} />
+                      </button>
+                    )}
                     <button className="icon-btn small" onClick={() => onEdit(collection)} title="Edit collection" type="button"><Icon name="settings" size={15} /></button>
                     <button
                       className="icon-btn small danger"
@@ -461,8 +545,8 @@ function CashCollectionsAdmin({ collections, onDelete, onEdit, onNew, orders, ri
                 </td>
               </tr>
             ))}
-            {collections.length === 0 && (
-              <tr><td colSpan="5"><span className="muted">No delivery fee collections recorded yet. Use Record cash to create the first record.</span></td></tr>
+            {filteredCollections.length === 0 && (
+              <tr><td colSpan="6"><span className="muted">{collections.length === 0 ? "No delivery fee collections recorded yet. Use Record cash to create the first record." : "No cash collections match the current filters."}</span></td></tr>
             )}
           </tbody>
         </table>
@@ -641,13 +725,12 @@ function OrderDrawer({ cashCollections = [], order, riders, close, onAssign, onC
       <AddressBlock from={order.pickup} to={order.destination} />
       <section>
         <p className="eyebrow">ORDER CREATOR</p>
-        <div className="creator-summary glass">
-          <CreatorSourceBadge type={creator.badge} />
-          <div>
-            <strong>{creator.isClient ? creator.accountName : "Office entry"}</strong>
-            <small>{creator.meta}</small>
-          </div>
+        <div className="detail-row">
+          <span>Source</span>
+          <strong><CreatorSourceBadge type={creator.badge} /></strong>
         </div>
+        <div className="detail-row"><span>Account</span><strong>{creator.isClient ? creator.accountName : "Office entry"}</strong></div>
+        <div className="detail-row"><span>Contact</span><strong>{creator.meta}</strong></div>
         {creator.isClient && creator.requesterName !== creator.accountName && (
           <div className="detail-row"><span>Requester on form</span><strong>{creator.requesterName}</strong></div>
         )}
@@ -657,9 +740,21 @@ function OrderDrawer({ cashCollections = [], order, riders, close, onAssign, onC
         <div className="detail-row"><span>Requester</span><strong>{order.client}</strong></div>
         <div className="detail-row"><span>Requester phone</span><strong>{order.clientPhone}</strong></div>
         <div className="detail-row"><span>Pickup</span><strong>{order.pickupContact}</strong></div>
+        <div className="detail-row"><span>Pickup phone</span><strong>{order.pickupPhone}</strong></div>
         <div className="detail-row"><span>Receiver</span><strong>{order.receiver}</strong></div>
+        <div className="detail-row"><span>Receiver phone</span><strong>{order.receiverPhone}</strong></div>
       </section>
-      <section><p className="eyebrow">PACKAGE & PAYMENT</p><div className="detail-row"><span>Product</span><strong>{order.product}</strong></div><div className="detail-row"><span>Delivery fee</span><strong>{formatDeliveryFeeLabel(order)}</strong></div><div className="detail-row"><span>Fee payment</span><strong>{order.paymentMethod}</strong></div>{order.codEnabled && <div className="detail-row"><span>Payment COD</span><strong>{money(order.cod)}</strong></div>}</section>
+      <section>
+        <p className="eyebrow">PACKAGE & PAYMENT</p>
+        <div className="detail-row"><span>Product</span><strong>{order.product}</strong></div>
+        <div className="detail-row"><span>Delivery fee</span><strong>{formatDeliveryFeeLabel(order)}</strong></div>
+        <div className="detail-row"><span>Fee payment</span><strong>{order.paymentMethod}</strong></div>
+        <div className="detail-row"><span>Fee status</span><strong><StatusBadge status={order.paymentStatus} /></strong></div>
+        <div className="detail-row">
+          <span>Product COD</span>
+          <strong>{order.codEnabled ? (Number(order.cod) > 0 ? `On - ${money(order.cod)}` : "On") : "Off"}</strong>
+        </div>
+      </section>
       <CashCollectionDrawerForm
         collection={cashCollection}
         onOrderSave={onOrderSave}
@@ -691,6 +786,17 @@ function CashCollectionDrawerForm({ collection, onOrderSave, onSave, order, ride
     setSaved(false);
     setForm((current) => ({ ...current, [key]: value }));
   };
+
+  useEffect(() => {
+    setForm({
+      codEnabled: Boolean(order.codEnabled),
+      codAmount: order.cod || 0,
+      deliveryFeeCollected: collection?.deliveryFeeCollected ?? order.fee ?? 0,
+      paymentNote: collection?.paymentNote || "",
+      confirmed: Boolean(collection?.confirmedAt),
+    });
+    setSaved(false);
+  }, [collection?._apiId, collection?.confirmedAt, collection?.deliveryFeeCollected, collection?.paymentNote, order._apiId, order.cod, order.codEnabled, order.fee]);
 
   const canRecordFee = order._apiId && (order.riderApiId || rider?._apiId);
 
@@ -767,15 +873,32 @@ function CashCollectionDrawerForm({ collection, onOrderSave, onSave, order, ride
 
 function AssignmentModal({ order, riders, close, onAssign }) {
   const [selected, setSelected] = useState(null);
+  const [search, setSearch] = useState("");
+  const assignableStatuses = new Set(["available", "online"]);
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredRiders = normalizedSearch
+    ? riders.filter((rider) => [
+        rider.name,
+        rider.phone,
+        rider.area,
+        rider.status,
+        rider.id,
+      ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch)))
+    : riders;
+
   return (
     <div className="modal-backdrop">
       <section className="assignment-modal glass">
         <div className="drawer-header"><div><p className="eyebrow">MANUAL ASSIGNMENT</p><h2>Assign rider</h2><small>{order.id} - Pickup from {order.pickup.split(",")[0]}</small></div><button className="icon-btn" onClick={close} type="button"><Icon name="close" /></button></div>
-        <div className="search-box"><Icon name="search" size={16} /><input placeholder="Search rider by name or area" /></div>
+        <label className="search-box assignment-search">
+          <Icon name="search" size={16} />
+          <input onChange={(event) => setSearch(event.target.value)} placeholder="Search rider, phone, or area" value={search} />
+        </label>
         <div className="assignment-list">
-          {riders.map((rider) => (
-            <button className={selected === rider.id ? "selected" : ""} disabled={rider.status === "offline"} key={rider.id} onClick={() => setSelected(rider.id)} type="button">
-              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} active - {rider.lastSeen}</small></span><StatusBadge status={rider.status} />
+          {filteredRiders.length === 0 && <p className="muted assignment-empty">No riders match this search.</p>}
+          {filteredRiders.map((rider) => (
+            <button className={selected === rider.id ? "selected" : ""} disabled={!assignableStatuses.has(rider.status)} key={rider.id} onClick={() => setSelected(rider.id)} type="button">
+              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} active - {assignableStatuses.has(rider.status) ? rider.lastSeen : "not available"}</small></span><StatusBadge status={rider.status} />
             </button>
           ))}
         </div>
@@ -806,7 +929,7 @@ function OrderEditorModal({ close, onSave, order }) {
     category: order.category || "Package",
     quantity: order.quantity || 1,
     fragile: Boolean(order.fragile),
-    paymentMethod: order.paymentMethod || "Cash on delivery",
+    paymentMethod: order.paymentMethod || "Cash",
     fee: order.fee ?? "",
     codEnabled: Boolean(order.codEnabled),
     cod: order.cod ?? "",
@@ -977,7 +1100,7 @@ function OrderEditorModal({ close, onSave, order }) {
             <input checked={form.fragile} onChange={(event) => update("fragile", event.target.checked)} type="checkbox" />
             <i />
           </label>
-          <CrudSelect label="Fee payment" onChange={(value) => update("paymentMethod", value)} options={["Cash on delivery", "Cash"]} value={form.paymentMethod} />
+          <CrudSelect label="Fee payment" onChange={(value) => update("paymentMethod", value)} options={["Cash", "Banking"]} value={form.paymentMethod} />
           <CrudField inputMode="numeric" label="Delivery fee (optional)" onChange={(value) => update("fee", value)} placeholder="Rider sets final fee" value={form.fee} />
           <label className="switch-row glass">
             <span><strong>Product COD</strong><small>Rider collects product payment separately</small></span>

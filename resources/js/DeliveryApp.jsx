@@ -298,7 +298,10 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
       savedOrder,
       ...current.filter((item) => item.id !== savedOrder.id),
     ]);
-    setReportData(await fetchReportSummary());
+
+    if (portal === "admin") {
+      setReportData(await fetchReportSummary());
+    }
 
     return savedOrder;
   };
@@ -312,7 +315,10 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
 
     await deleteDeliveryOrder(order);
     setOrders((current) => current.filter((item) => item.id !== orderId));
-    setReportData(await fetchReportSummary());
+
+    if (portal === "admin") {
+      setReportData(await fetchReportSummary());
+    }
   };
 
   const saveRider = async (rider) => {
@@ -423,23 +429,28 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     setReportData(await fetchReportSummary());
   };
 
-  const progressOrder = async (orderId, status, deliveryFee) => {
+  const progressOrder = async (orderId, status, deliveryFee, note = "") => {
     const order = orders.find((item) => item.id === orderId);
 
     if (!order?._apiId) {
       return;
     }
 
-    const updatedOrder = await updateDeliveryOrderStatus(order, status, deliveryFee);
+    const updatedOrder = await updateDeliveryOrderStatus(order, status, deliveryFee, note);
 
     setOrders((current) => current.map((item) => item.id === orderId ? updatedOrder : item));
     setNotifications(await fetchNotifications());
 
-    if (status === "completed") {
+    if (["completed", "failed", "cancelled"].includes(status)) {
       setRiders(await fetchRiders());
-      setCashCollections(await fetchCashCollections());
-      setReportData(await fetchReportSummary());
+
+      if (status === "completed" && portal === "admin") {
+        setCashCollections(await fetchCashCollections());
+        setReportData(await fetchReportSummary());
+      }
     }
+
+    return updatedOrder;
   };
 
   const markNotificationRead = async (notificationId) => {
@@ -500,21 +511,23 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
       {loading && <div className="data-loading">Loading live data...</div>}
       {error && <div className="data-error">{error}</div>}
       {portal === "client" && (
-        <ClientPortal
-          addresses={clientAddresses}
-          appName={appName}
-          contactEmail={contactEmail}
-          contactPhone={contactPhone}
-          markNotificationRead={markNotificationRead}
-          notifications={notifications}
-          onLogout={handleLogout}
-          orders={orders}
-          removeAddress={removeClientAddress}
-          saveAddress={saveClientAddress}
-          saveShop={saveClientShop}
-          saveProfile={saveClientProfile}
-          setDefaultAddress={setDefaultClientAddress}
-          shops={shops}
+          <ClientPortal
+            addresses={clientAddresses}
+            appName={appName}
+            contactEmail={contactEmail}
+            contactPhone={contactPhone}
+            markNotificationRead={markNotificationRead}
+            notifications={notifications}
+            onLogout={handleLogout}
+            orders={orders}
+            removeOrder={removeOrder}
+            removeAddress={removeClientAddress}
+            saveAddress={saveClientAddress}
+            saveOrder={saveOrder}
+            saveShop={saveClientShop}
+            saveProfile={saveClientProfile}
+            setDefaultAddress={setDefaultClientAddress}
+            shops={shops}
           submitOrder={submitOrder}
           themeProps={themeProps}
           user={auth.user}
@@ -552,10 +565,6 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           users={users}
         />
       )}
-      <button className="session-btn glass" onClick={handleLogout} type="button">
-        <Icon name="user" size={15} />
-        {auth.user.name}
-      </button>
     </div>
   );
 }

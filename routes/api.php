@@ -64,9 +64,12 @@ Route::middleware(['auth:sanctum', 'role:client,rider,office_admin,super_admin']
         ->name('delivery-orders.index');
 });
 
-Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(function () {
+Route::middleware(['auth:sanctum', 'role:client,office_admin,super_admin'])->group(function () {
     Route::patch('delivery-orders/{deliveryOrder}', [DeliveryOrderController::class, 'update']);
     Route::delete('delivery-orders/{deliveryOrder}', [DeliveryOrderController::class, 'destroy']);
+});
+
+Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(function () {
     Route::post('delivery-orders/{deliveryOrder}/assign', [DeliveryOrderController::class, 'assign']);
     Route::get('payments', [PaymentController::class, 'index']);
     Route::post('payments', [PaymentController::class, 'store']);

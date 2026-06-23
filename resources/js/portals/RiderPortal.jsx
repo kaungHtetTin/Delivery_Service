@@ -34,7 +34,16 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
       <div className="mobile-app rider-app">
         <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
         <main className="mobile-content">
-          <RiderJobDetail history={isHistory} onBack={() => setSelectedId(null)} onProgress={progressOrder} order={selectedOrder} />
+          <RiderJobDetail
+            history={isHistory}
+            onBack={() => setSelectedId(null)}
+            onComplete={() => {
+              setSelectedId(null);
+              setPage("history");
+            }}
+            onProgress={progressOrder}
+            order={selectedOrder}
+          />
         </main>
       </div>
     );
@@ -149,32 +158,80 @@ function RiderHistory({ onOpen, orders }) {
   );
 }
 
-function RiderJobDetail({ history = false, order, onBack, onProgress }) {
+function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress }) {
   const [completing, setCompleting] = useState(false);
   const [feeInput, setFeeInput] = useState("");
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issueNote, setIssueNote] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [progressing, setProgressing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const action = nextRiderActions[order.status];
   const isCompleteStep = action?.[1] === "completed";
+  const canReportIssue = !history && !["delivered", "completed", "failed", "cancelled"].includes(order.status);
+  const pickupPhoneHref = order.pickupPhone ? `tel:${order.pickupPhone.replace(/[^\d+]/g, "")}` : "";
+  const receiverPhoneHref = order.receiverPhone ? `tel:${order.receiverPhone.replace(/[^\d+]/g, "")}` : "";
+  const pickupMapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.pickup)}`;
+  const deliveryMapHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.destination)}`;
 
-  const handleAction = () => {
+  const errorMessage = (error) =>
+    error?.payload?.message ||
+    Object.values(error?.payload?.errors || {})?.[0]?.[0] ||
+    error?.message ||
+    "Could not update this delivery.";
+
+  const handleAction = async () => {
     if (!action) {
       return;
     }
+
+    setActionError("");
 
     if (isCompleteStep) {
       setCompleting(true);
       return;
     }
 
-    onProgress(order.id, action[1]);
+    setProgressing(true);
+
+    try {
+      await onProgress(order.id, action[1]);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setProgressing(false);
+    }
   };
 
   const confirmComplete = async (event) => {
     event.preventDefault();
     setSubmitting(true);
-    await onProgress(order.id, "completed", Number(feeInput || 0));
-    setSubmitting(false);
-    setCompleting(false);
+    setActionError("");
+
+    try {
+      await onProgress(order.id, "completed", Number(feeInput || 0));
+      setCompleting(false);
+      onComplete?.();
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reportIssue = async (status) => {
+    setSubmitting(true);
+    setActionError("");
+
+    try {
+      await onProgress(order.id, status, undefined, issueNote);
+      setIssueOpen(false);
+      onComplete?.();
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -188,22 +245,29 @@ function RiderJobDetail({ history = false, order, onBack, onProgress }) {
         <div className="stop-heading"><span className="route-marker pickup" /><p className="eyebrow">PICKUP</p></div>
         <h3>{order.pickupContact}</h3><p>{order.pickup}</p>
         <div className="action-grid">
-          <button className="btn secondary" type="button"><Icon name="phone" size={15} /> Call</button>
-          <button className="btn primary" type="button"><Icon name="navigation" size={15} /> Navigate</button>
+          <a className="btn secondary" href={pickupPhoneHref || undefined}><Icon name="phone" size={15} /> Call</a>
+          <a className="btn primary" href={pickupMapHref} rel="noreferrer" target="_blank"><Icon name="navigation" size={15} /> Navigate</a>
         </div>
       </section>
       <section className="stop-card glass">
         <div className="stop-heading"><span className="route-marker destination" /><p className="eyebrow">DELIVERY</p></div>
         <h3>{order.receiver}</h3><p>{order.destination}</p>
         <div className="action-grid">
-          <button className="btn secondary" type="button"><Icon name="phone" size={15} /> Call</button>
-          <button className="btn primary" type="button"><Icon name="navigation" size={15} /> Navigate</button>
+          <a className="btn secondary" href={receiverPhoneHref || undefined}><Icon name="phone" size={15} /> Call</a>
+          <a className="btn primary" href={deliveryMapHref} rel="noreferrer" target="_blank"><Icon name="navigation" size={15} /> Navigate</a>
         </div>
       </section>
       <section className="order-summary glass">
         <div><small>PRODUCT</small><strong>{order.product}</strong></div>
         <div><small>DELIVERY FEE</small><strong>{formatDeliveryFeeLabel(order)}</strong></div>
+        <div><small>PRODUCT COD</small><strong>{order.codEnabled ? (Number(order.cod) > 0 ? `On - ${money(order.cod)}` : "On") : "Off"}</strong></div>
         {history && <div><small>LAST UPDATED</small><strong>{order.updatedAt}</strong></div>}
+        {order.codEnabled && (
+          <p className="cod-warning-note">
+            <Icon name="wallet" size={15} />
+            Cash on delivery: collect product payment from receiver.
+          </p>
+        )}
         {order.fragile && <p className="warning-note">Fragile item - Handle with care</p>}
       </section>
       {!history && isCompleteStep && (
@@ -215,11 +279,12 @@ function RiderJobDetail({ history = false, order, onBack, onProgress }) {
           </div>
         </section>
       )}
+      {actionError && <p className="auth-error request-error">{actionError}</p>}
       {!history && (
         <div className="sticky-actions glass">
-          <button className="btn secondary" type="button"><Icon name="more" size={16} /> Issue</button>
-          <button className="btn primary grow" disabled={!action} onClick={handleAction} type="button">
-            {action ? action[0] : "Workflow complete"} <Icon name="arrowRight" size={16} />
+          <button className="btn secondary" disabled={!canReportIssue || progressing} onClick={() => setIssueOpen(true)} type="button"><Icon name="more" size={16} /> Issue</button>
+          <button className="btn primary grow" disabled={!action || progressing} onClick={handleAction} type="button">
+            {progressing ? "Saving..." : action ? action[0] : "Workflow complete"} <Icon name="arrowRight" size={16} />
           </button>
         </div>
       )}
@@ -234,23 +299,52 @@ function RiderJobDetail({ history = false, order, onBack, onProgress }) {
               <button className="icon-btn" onClick={() => setCompleting(false)} type="button"><Icon name="close" /></button>
             </div>
             <p className="muted">Enter the cash amount collected from the client for this delivery.</p>
+            {actionError && <p className="auth-error">{actionError}</p>}
             <label className="field-label">Delivery fee (MMK)</label>
-            <input
-              autoFocus
-              className="text-input"
-              inputMode="numeric"
-              min="0"
-              onChange={(event) => setFeeInput(event.target.value)}
-              placeholder="e.g. 3000"
-              required
-              type="number"
-              value={feeInput}
-            />
+            <div className="fee-amount-input">
+              <Icon name="wallet" size={18} />
+              <input
+                autoFocus
+                className="text-input"
+                inputMode="numeric"
+                min="0"
+                onChange={(event) => setFeeInput(event.target.value)}
+                placeholder="3000"
+                required
+                type="number"
+                value={feeInput}
+              />
+              <span>MMK</span>
+            </div>
             <div className="modal-actions">
               <button className="btn secondary" onClick={() => setCompleting(false)} type="button">Cancel</button>
               <button className="btn primary grow" disabled={submitting} type="submit">
                 {submitting ? "Saving..." : "Complete order"} <Icon name="check" size={16} />
               </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {issueOpen && (
+        <div className="modal-backdrop">
+          <form className="operation-modal glass rider-complete-modal" onSubmit={(event) => event.preventDefault()}>
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">DELIVERY ISSUE</p>
+                <h2>Report problem</h2>
+              </div>
+              <button className="icon-btn" onClick={() => setIssueOpen(false)} type="button"><Icon name="close" /></button>
+            </div>
+            <p className="muted">Use this when the delivery cannot continue. The order will move to history.</p>
+            {actionError && <p className="auth-error">{actionError}</p>}
+            <label className="form-field">
+              <span>Issue note</span>
+              <input onChange={(event) => setIssueNote(event.target.value)} placeholder="Receiver unavailable, package problem..." value={issueNote} />
+            </label>
+            <div className="modal-actions">
+              <button className="btn secondary" disabled={submitting} onClick={() => setIssueOpen(false)} type="button">Cancel</button>
+              <button className="btn danger" disabled={submitting} onClick={() => reportIssue("failed")} type="button">Mark failed</button>
+              <button className="btn primary" disabled={submitting} onClick={() => reportIssue("cancelled")} type="button">Cancel job</button>
             </div>
           </form>
         </div>

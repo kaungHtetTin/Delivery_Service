@@ -47,9 +47,9 @@ const humanize = (value) =>
 
 const paymentMethodLabels = {
   cash: "Cash",
-  cash_on_delivery: "Cash on delivery",
+  cash_on_delivery: "Cash",
   prepaid: "Prepaid",
-  mobile_banking: "Mobile banking",
+  mobile_banking: "Banking",
 };
 
 const initials = (name) =>
@@ -407,6 +407,7 @@ export function mapCashCollection(collection) {
     deliveryFeeCollected: Number(collection.delivery_fee_collected),
     totalCashCollected: Number(collection.total_cash_collected),
     paymentNote: collection.payment_note || "",
+    confirmed: Boolean(collection.confirmed_at),
     confirmedAt: collection.confirmed_at ? new Date(collection.confirmed_at).toLocaleString() : "",
     createdAt: collection.created_at ? new Date(collection.created_at).toLocaleString() : "Just now",
   };
@@ -715,7 +716,7 @@ export async function assignDeliveryOrder(order, rider) {
   return mapOrder(response);
 }
 
-export async function updateDeliveryOrderStatus(order, status, deliveryFee) {
+export async function updateDeliveryOrderStatus(order, status, deliveryFee, note = "") {
   const body = {
     status,
     actor_type: "rider",
@@ -723,6 +724,10 @@ export async function updateDeliveryOrderStatus(order, status, deliveryFee) {
 
   if (deliveryFee !== undefined && deliveryFee !== null) {
     body.delivery_fee = deliveryFee;
+  }
+
+  if (note) {
+    body.note = note;
   }
 
   const response = await request(`/delivery-orders/${order._apiId}/status`, {
@@ -761,9 +766,7 @@ function orderPayload(order) {
     product_category: order.category,
     quantity: Number(order.quantity || 1),
     is_fragile: Boolean(order.fragile),
-    delivery_fee_payment_method: order.paymentMethod
-      .toLowerCase()
-      .replaceAll(" ", "_"),
+    delivery_fee_payment_method: deliveryFeePaymentMethodValue(order.paymentMethod),
     ...(order.codEnabled !== undefined
       ? {
           product_payment_method: order.codEnabled ? "rider_collects" : "already_paid",
@@ -781,6 +784,20 @@ function orderPayload(order) {
     ...(order.status ? { status: order.status } : {}),
     ...(order.paymentStatus ? { payment_status: order.paymentStatus } : {}),
   };
+}
+
+function deliveryFeePaymentMethodValue(method = "Cash") {
+  const normalized = String(method).toLowerCase().replaceAll(" ", "_");
+
+  if (["banking", "mobile_banking"].includes(normalized)) {
+    return "mobile_banking";
+  }
+
+  if (["cash", "cash_on_delivery"].includes(normalized)) {
+    return "cash";
+  }
+
+  return normalized;
 }
 
 function userPayload(user) {

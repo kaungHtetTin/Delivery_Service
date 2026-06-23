@@ -12,6 +12,8 @@ use App\Models\Customer;
 use App\Models\User;
 use App\Models\Shop;
 use App\Models\SystemSetting;
+use Database\Seeders\DeliveryDemoSeeder;
+use Database\Seeders\SystemSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
@@ -31,7 +33,7 @@ class DeliveryOrderApiTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('status', 'pending')
             ->assertJsonPath('payment_status', 'unpaid')
-            ->assertJsonPath('delivery_fee_payment_method', 'cash_on_delivery')
+            ->assertJsonPath('delivery_fee_payment_method', 'cash')
             ->assertJsonCount(1, 'status_histories')
             ->assertJsonCount(0, 'payments');
 
@@ -72,11 +74,34 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
-    public function test_rider_cannot_complete_without_delivery_fee()
+    public function test_office_cannot_assign_a_busy_rider()
     {
-        $this->actingAsRole(User::ROLE_RIDER);
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
 
         $rider = $this->createRider(['status' => 'busy']);
+        $order = DeliveryOrder::create($this->validOrderPayload());
+
+        $this->postJson("/api/delivery-orders/{$order->id}/assign", [
+            'rider_id' => $rider->id,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('rider_id');
+
+        $this->assertDatabaseHas('delivery_orders', [
+            'id' => $order->id,
+            'status' => 'pending',
+            'rider_id' => null,
+        ]);
+    }
+
+    public function test_rider_cannot_complete_without_delivery_fee()
+    {
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'status' => 'busy',
+            'user_id' => $riderUser->id,
+        ]);
         $order = DeliveryOrder::create($this->validOrderPayload() + [
             'status' => 'delivered',
             'rider_id' => $rider->id,
@@ -91,9 +116,13 @@ class DeliveryOrderApiTest extends TestCase
 
     public function test_rider_completion_sets_delivery_fee_and_creates_cash_collection()
     {
-        $this->actingAsRole(User::ROLE_RIDER);
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
 
-        $rider = $this->createRider(['status' => 'busy', 'cash_held' => 0]);
+        $rider = $this->createRider([
+            'status' => 'busy',
+            'cash_held' => 0,
+            'user_id' => $riderUser->id,
+        ]);
         $order = DeliveryOrder::create($this->validOrderPayload() + [
             'status' => 'delivered',
             'delivery_fee' => 0,
@@ -124,22 +153,63 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
-    public function test_order_without_delivery_fee_payment_method_defaults_to_cash_on_delivery()
+    public function test_order_without_delivery_fee_payment_method_defaults_to_cash()
     {
         $payload = $this->validOrderPayload();
         unset($payload['delivery_fee_payment_method']);
 
         $this->postJson('/api/delivery-orders', $payload)
             ->assertCreated()
-            ->assertJsonPath('delivery_fee_payment_method', 'cash_on_delivery')
+            ->assertJsonPath('delivery_fee_payment_method', 'cash')
             ->assertJsonPath('payment_status', 'unpaid');
+    }
+
+    public function test_delivery_fee_payment_method_only_allows_cash_or_banking()
+    {
+        foreach (['cash_on_delivery', 'prepaid'] as $method) {
+            $this->postJson('/api/delivery-orders', array_merge($this->validOrderPayload(), [
+                'delivery_fee_payment_method' => $method,
+            ]))
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('delivery_fee_payment_method');
+        }
+
+        $this->postJson('/api/delivery-orders', array_merge($this->validOrderPayload(), [
+            'delivery_fee_payment_method' => 'mobile_banking',
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('delivery_fee_payment_method', 'mobile_banking');
+    }
+
+    public function test_authenticated_client_can_create_a_delivery_request_with_product_cod_on()
+    {
+        $client = $this->createUser([
+            'email' => 'cod-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+
+        Sanctum::actingAs($client);
+
+        $this->postJson('/api/delivery-orders', array_merge($this->validOrderPayload(), [
+            'client_name' => $client->name,
+            'client_phone' => $client->phone,
+            'product_payment_method' => 'rider_collects',
+            'cod_amount' => 0,
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('client_user_id', $client->id)
+            ->assertJsonPath('product_payment_method', 'rider_collects')
+            ->assertJsonPath('cod_amount', '0.00');
     }
 
     public function test_rider_cannot_skip_required_workflow_steps()
     {
-        $this->actingAsRole(User::ROLE_RIDER);
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
 
-        $rider = $this->createRider(['status' => 'busy']);
+        $rider = $this->createRider([
+            'status' => 'busy',
+            'user_id' => $riderUser->id,
+        ]);
         $order = DeliveryOrder::create($this->validOrderPayload() + [
             'status' => 'rider_assigned',
             'rider_id' => $rider->id,
@@ -154,6 +224,35 @@ class DeliveryOrderApiTest extends TestCase
             'actor_type' => 'rider',
             'actor_id' => $rider->id,
         ])->assertOk()->assertJsonPath('status', 'rider_accepted');
+    }
+
+    public function test_rider_cannot_progress_an_order_assigned_to_another_rider()
+    {
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
+        $this->createRider([
+            'code' => 'R-AUTH',
+            'phone' => '09 111 222 336',
+            'user_id' => $riderUser->id,
+        ]);
+        $otherRider = $this->createRider([
+            'code' => 'R-OTHER-JOB',
+            'phone' => '09 111 222 337',
+            'status' => 'busy',
+        ]);
+        $order = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'rider_assigned',
+            'rider_id' => $otherRider->id,
+        ]);
+
+        $this->patchJson("/api/delivery-orders/{$order->id}/status", [
+            'status' => 'rider_accepted',
+        ])->assertForbidden();
+
+        $this->assertDatabaseHas('delivery_orders', [
+            'id' => $order->id,
+            'status' => 'rider_assigned',
+            'rider_id' => $otherRider->id,
+        ]);
     }
 
     public function test_reassignment_releases_previous_rider_when_idle()
@@ -369,14 +468,62 @@ class DeliveryOrderApiTest extends TestCase
             'total_cash_collected' => 3000,
             'confirmed_at' => now(),
         ]);
+        $pendingRider = $this->createRider([
+            'code' => 'R-REPORT-PENDING',
+            'phone' => '09 700 100 199',
+        ]);
+        $pendingOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'completed',
+            'payment_status' => 'paid',
+            'rider_id' => $pendingRider->id,
+        ]);
+        CashCollection::create([
+            'delivery_order_id' => $pendingOrder->id,
+            'rider_id' => $pendingRider->id,
+            'product_cash_collected' => 0,
+            'delivery_fee_collected' => 2000,
+            'total_cash_collected' => 2000,
+        ]);
+        $failedOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'failed',
+            'payment_status' => 'pending_approval',
+        ]);
+        Payment::create([
+            'delivery_order_id' => $failedOrder->id,
+            'type' => 'delivery_fee',
+            'method' => 'mobile_banking',
+            'amount' => 1500,
+            'status' => 'pending_approval',
+        ]);
+        $cancelledOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'cancelled',
+            'payment_status' => 'rejected',
+        ]);
+        Payment::create([
+            'delivery_order_id' => $cancelledOrder->id,
+            'type' => 'delivery_fee',
+            'method' => 'mobile_banking',
+            'amount' => 1000,
+            'status' => 'rejected',
+        ]);
 
         $this->getJson('/api/reports/summary')
             ->assertOk()
-            ->assertJsonPath('orders.total', 1)
-            ->assertJsonPath('orders.completed', 1)
+            ->assertJsonPath('orders.total', 4)
+            ->assertJsonPath('orders.active', 0)
+            ->assertJsonPath('orders.completed', 2)
+            ->assertJsonPath('orders.failed', 1)
+            ->assertJsonPath('orders.cancelled', 1)
+            ->assertJsonPath('payments.pending_approval', 1)
+            ->assertJsonPath('payments.paid', 1)
+            ->assertJsonPath('payments.rejected', 1)
             ->assertJsonPath('payments.approved_amount', 3000)
-            ->assertJsonPath('cash_collections.total_collected', 3000)
-            ->assertJsonPath('riders.0.name', 'Test Rider');
+            ->assertJsonPath('cash_collections.total_collected', 5000)
+            ->assertJsonPath('cash_collections.confirmed_amount', 3000)
+            ->assertJsonPath('cash_collections.pending_amount', 2000)
+            ->assertJsonPath('cash_collections.confirmed', 1)
+            ->assertJsonPath('cash_collections.pending', 1)
+            ->assertJsonCount(2, 'riders');
     }
 
     public function test_office_can_view_admin_logs()
@@ -596,12 +743,30 @@ class DeliveryOrderApiTest extends TestCase
             'cash_held' => 3000,
         ]);
 
+        $this->getJson('/api/cash-collections?confirmed=false')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $collectionId);
+
+        $this->getJson('/api/cash-collections?confirmed=true')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+
         $this->patchJson("/api/cash-collections/{$collectionId}", [
             'delivery_fee_collected' => 3000,
             'confirmed_at' => now()->toISOString(),
         ])
             ->assertOk()
             ->assertJsonPath('total_cash_collected', '3000.00');
+
+        $this->getJson('/api/cash-collections?confirmed=true')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $collectionId);
+
+        $this->getJson('/api/cash-collections?confirmed=false')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
 
         $this->assertDatabaseHas('riders', [
             'id' => $rider->id,
@@ -866,6 +1031,64 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonStructure(['token']);
     }
 
+    public function test_seeded_office_rider_and_client_accounts_can_log_in()
+    {
+        $this->seed([
+            SystemSeeder::class,
+            DeliveryDemoSeeder::class,
+        ]);
+
+        $accounts = [
+            ['email' => 'office@example.test', 'role' => User::ROLE_SUPER_ADMIN],
+            ['email' => 'rider@example.test', 'role' => User::ROLE_RIDER],
+            ['email' => 'client@example.test', 'role' => User::ROLE_CLIENT],
+        ];
+
+        foreach ($accounts as $account) {
+            $this->postJson('/api/auth/token', [
+                'email' => $account['email'],
+                'password' => 'password',
+                'device_name' => 'phase-2-test',
+            ])
+                ->assertOk()
+                ->assertJsonPath('user.email', $account['email'])
+                ->assertJsonPath('user.role', $account['role'])
+                ->assertJsonStructure(['token']);
+        }
+    }
+
+    public function test_roles_are_blocked_from_wrong_protected_areas()
+    {
+        $client = $this->actingAsRole(User::ROLE_CLIENT);
+
+        $this->getJson('/api/users')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This action is not available for your role.');
+        $this->getJson('/api/riders')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This action is not available for your role.');
+
+        $rider = $this->actingAsRole(User::ROLE_RIDER);
+
+        $this->getJson('/api/client/profile')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This action is not available for your role.');
+        $this->getJson('/api/users')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This action is not available for your role.');
+
+        $office = $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $this->getJson('/api/client/profile')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This action is not available for your role.');
+        $this->getJson('/api/users')->assertOk();
+
+        $this->assertTrue($client->hasAnyRole([User::ROLE_CLIENT]));
+        $this->assertTrue($rider->hasAnyRole([User::ROLE_RIDER]));
+        $this->assertTrue($office->hasAnyRole([User::ROLE_OFFICE_ADMIN, User::ROLE_SUPER_ADMIN]));
+    }
+
     public function test_client_can_register_and_sign_out()
     {
         $registerResponse = $this->postJson('/api/auth/register', [
@@ -1074,6 +1297,112 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonPath('data.0.receiver_name', 'Visible Receiver');
     }
 
+    public function test_client_can_update_their_own_pending_delivery_request()
+    {
+        $client = $this->createUser(['role' => User::ROLE_CLIENT]);
+        $order = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'client_user_id' => $client->id,
+            'status' => 'pending',
+            'receiver_name' => 'Original Receiver',
+        ]));
+
+        Sanctum::actingAs($client);
+
+        $this->patchJson("/api/delivery-orders/{$order->id}", [
+            'receiver_name' => 'Updated Receiver',
+            'receiver_phone' => '09 777 111 222',
+            'receiver_address' => 'Updated Street, Yangon',
+            'product_name' => 'Updated package',
+            'product_payment_method' => 'rider_collects',
+            'cod_amount' => 0,
+            'client_note' => 'Please call first.',
+            'status' => 'approved',
+            'payment_status' => 'paid',
+        ])
+            ->assertOk()
+            ->assertJsonPath('receiver_name', 'Updated Receiver')
+            ->assertJsonPath('receiver_phone', '09 777 111 222')
+            ->assertJsonPath('product_payment_method', 'rider_collects')
+            ->assertJsonPath('status', 'pending')
+            ->assertJsonPath('payment_status', 'unpaid');
+
+        $this->assertDatabaseHas('delivery_orders', [
+            'id' => $order->id,
+            'receiver_name' => 'Updated Receiver',
+            'product_payment_method' => 'rider_collects',
+            'cod_amount' => 0,
+            'status' => 'pending',
+            'payment_status' => 'unpaid',
+        ]);
+        $this->assertDatabaseHas('admin_logs', [
+            'action' => 'delivery_order_updated',
+            'subject_type' => DeliveryOrder::class,
+            'subject_id' => $order->id,
+            'actor_type' => User::ROLE_CLIENT,
+            'actor_id' => $client->id,
+        ]);
+    }
+
+    public function test_client_can_delete_their_own_pending_delivery_request()
+    {
+        $client = $this->createUser(['role' => User::ROLE_CLIENT]);
+        $order = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'client_user_id' => $client->id,
+            'status' => 'pending',
+        ]));
+
+        Sanctum::actingAs($client);
+
+        $this->deleteJson("/api/delivery-orders/{$order->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Delivery order deleted.');
+
+        $this->assertDatabaseMissing('delivery_orders', ['id' => $order->id]);
+        $this->assertDatabaseHas('admin_logs', [
+            'action' => 'delivery_order_deleted',
+            'subject_type' => DeliveryOrder::class,
+            'subject_id' => $order->id,
+            'actor_type' => User::ROLE_CLIENT,
+            'actor_id' => $client->id,
+        ]);
+    }
+
+    public function test_client_cannot_update_or_delete_other_or_reviewed_delivery_requests()
+    {
+        $client = $this->createUser(['role' => User::ROLE_CLIENT]);
+        $otherClient = $this->createUser([
+            'email' => 'other-owner@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $otherOrder = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'client_user_id' => $otherClient->id,
+            'status' => 'pending',
+        ]));
+        $approvedOrder = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'client_user_id' => $client->id,
+            'status' => 'approved',
+        ]));
+
+        Sanctum::actingAs($client);
+
+        $this->patchJson("/api/delivery-orders/{$otherOrder->id}", [
+            'receiver_name' => 'Attempted Update',
+        ])->assertForbidden();
+
+        $this->patchJson("/api/delivery-orders/{$approvedOrder->id}", [
+            'receiver_name' => 'Late Update',
+        ])->assertUnprocessable();
+
+        $this->deleteJson("/api/delivery-orders/{$approvedOrder->id}")
+            ->assertUnprocessable();
+
+        $this->assertDatabaseHas('delivery_orders', [
+            'id' => $approvedOrder->id,
+            'receiver_name' => 'May Thu',
+            'status' => 'approved',
+        ]);
+    }
+
     public function test_authenticated_client_submission_is_attached_to_their_account()
     {
         $client = $this->createUser([
@@ -1220,7 +1549,7 @@ class DeliveryOrderApiTest extends TestCase
             'receiver_address' => 'Sanchaung Street, Sanchaung',
             'product_name' => 'Clothing package',
             'quantity' => 1,
-            'delivery_fee_payment_method' => 'cash_on_delivery',
+            'delivery_fee_payment_method' => 'cash',
             'product_payment_method' => 'already_paid',
             'delivery_fee' => 0,
         ];

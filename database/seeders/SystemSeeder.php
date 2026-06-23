@@ -14,10 +14,10 @@ class SystemSeeder extends Seeder
         User::updateOrCreate(
             ['email' => 'office@example.test'],
             [
-                'name' => 'May Aye',
+                'name' => 'Super Admin Office',
                 'phone' => '09 500 100 100',
                 'password' => Hash::make('password'),
-                'role' => User::ROLE_OFFICE_ADMIN,
+                'role' => User::ROLE_SUPER_ADMIN,
             ]
         );
 

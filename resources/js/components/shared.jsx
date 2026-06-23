@@ -108,14 +108,14 @@ export function ThemeControl({ theme, setTheme, brand, setBrand }) {
   );
 }
 
-export function MobileTopbar({ appName, title, themeProps, unreadCount = 0 }) {
+export function MobileTopbar({ appName, onNotifications, title, themeProps, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
       <Logo appName={appName} />
       {title && <span className="topbar-title">{title}</span>}
       <div className="topbar-actions">
         <ThemeControl {...themeProps} />
-        <button aria-label="Notifications" className="icon-btn notification-btn" type="button">
+        <button aria-label="Notifications" className="icon-btn notification-btn" onClick={onNotifications} type="button">
           <Icon name="bell" />
           {unreadCount > 0 && <span />}
         </button>
@@ -212,13 +212,18 @@ export function NotificationList({ notifications = [], onRead, title = "Notifica
   );
 }
 
-export function CreatorSourceBadge({ type = "office" }) {
+export function CreatorSourceBadge({ compact = false, type = "office" }) {
   const isClient = type === "client";
+  const label = isClient ? "Client" : "Office";
 
   return (
-    <span className={`creator-source-badge ${isClient ? "client" : "office"}`}>
+    <span
+      className={`creator-source-badge ${compact ? "compact" : ""} ${isClient ? "client" : "office"}`}
+      title={label}
+    >
       <Icon name={isClient ? "user" : "settings"} size={12} />
-      {isClient ? "Client" : "Office"}
+      {!compact && label}
+      {compact && <span>{isClient ? "C" : "O"}</span>}
     </span>
   );
 }
