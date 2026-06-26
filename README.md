@@ -135,5 +135,7 @@ The test suite uses `delivery_app_testing` from `phpunit.xml`. It refreshes that
 * [Product specification](docs/specification.txt)
 * [Roadmap](docs/roadmap.md)
 * [Mini version roadmap](docs/mini-version-roadmap.md)
+* [Realtime websocket and map roadmap](docs/realtime-websocket-map-roadmap.md)
 * [UI/UX specification](docs/ui-ux-specification.md)
 * [Architecture notes](docs/architecture.md)
+* [Separate socket server](socket-server/README.md)
