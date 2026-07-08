@@ -36,6 +36,21 @@ class UpdateDeliveryOrderStatusRequest extends FormRequest
             'note' => ['nullable', 'string', 'max:1000'],
             'actor_type' => ['nullable', 'string', 'max:100'],
             'actor_id' => ['nullable', 'integer', 'min:1'],
+            'receiver_name' => ['nullable', 'string', 'max:255'],
+            'receiver_phone' => [
+                Rule::requiredIf(fn () => $this->input('status') === 'picked_up'),
+                'nullable',
+                'string',
+                'max:30',
+            ],
+            'receiver_address' => [
+                Rule::requiredIf(fn () => $this->input('status') === 'picked_up'),
+                'nullable',
+                'string',
+                'max:1000',
+            ],
+            'product_payment_method' => ['nullable', 'in:already_paid,rider_collects'],
+            'cod_amount' => ['nullable', 'numeric', 'min:0'],
         ];
     }
 }

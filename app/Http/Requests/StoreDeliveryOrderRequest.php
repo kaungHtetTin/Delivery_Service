@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Auth;
 
 class StoreDeliveryOrderRequest extends FormRequest
 {
@@ -23,19 +25,28 @@ class StoreDeliveryOrderRequest extends FormRequest
      */
     public function rules()
     {
+        $user = $this->user() ?? Auth::guard('sanctum')->user();
+        $isOfficeUser = $user?->hasAnyRole([
+            User::ROLE_OFFICE_ADMIN,
+            User::ROLE_SUPER_ADMIN,
+        ]) ?? false;
+        $isClientUser = $user?->role === User::ROLE_CLIENT;
+        $requesterRules = $isOfficeUser ? ['nullable'] : ['required'];
+        $destinationRules = ($isOfficeUser || $isClientUser) ? ['nullable'] : ['required'];
+
         return [
-            'client_name' => ['required', 'string', 'max:255'],
+            'client_name' => [...$requesterRules, 'string', 'max:255'],
             'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
             'shop_id' => ['nullable', 'integer', 'exists:shops,id'],
-            'client_phone' => ['required', 'string', 'max:30'],
+            'client_phone' => [...$requesterRules, 'string', 'max:30'],
             'pickup_contact_name' => ['required', 'string', 'max:255'],
             'pickup_phone' => ['required', 'string', 'max:30'],
             'pickup_address' => ['required', 'string', 'max:1000'],
             'pickup_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'pickup_longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'receiver_name' => ['required', 'string', 'max:255'],
-            'receiver_phone' => ['required', 'string', 'max:30'],
-            'receiver_address' => ['required', 'string', 'max:1000'],
+            'receiver_name' => [...$destinationRules, 'string', 'max:255'],
+            'receiver_phone' => [...$destinationRules, 'string', 'max:30'],
+            'receiver_address' => [...$destinationRules, 'string', 'max:1000'],
             'receiver_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'receiver_longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'product_name' => ['required', 'string', 'max:255'],

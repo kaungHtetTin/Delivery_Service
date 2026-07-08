@@ -12,11 +12,7 @@ export const currentDateLabel = () =>
 export const activeStatuses = new Set([
   "rider_assigned",
   "rider_accepted",
-  "going_to_pickup",
-  "arrived_at_pickup",
   "picked_up",
-  "going_to_delivery",
-  "arrived_at_delivery",
   "delivered",
 ]);
 

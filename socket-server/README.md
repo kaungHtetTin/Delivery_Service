@@ -9,6 +9,8 @@ Standalone Node.js websocket service for FlowDrop Delivery. It is intentionally 
 - HTTP publish endpoint for Laravel/server-to-server events
 - HMAC-signed socket auth token support
 - Development-only unsigned socket auth option
+- Structured JSON logs for connections, auth failures, publish results, and shutdown
+- Basic publish endpoint rate limiting
 
 ## Install
 
@@ -22,10 +24,12 @@ Update `.env` before using it outside local development:
 
 ```dotenv
 PORT=4100
-CORS_ORIGIN=http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173
+CORS_ORIGIN=http://localhost,http://127.0.0.1,http://localhost:80,http://127.0.0.1:80,http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173
 INTERNAL_API_KEY=change-this-in-production
 SOCKET_AUTH_SECRET=change-this-signing-secret
 ALLOW_UNSIGNED_AUTH=true
+PUBLISH_RATE_LIMIT=120
+PUBLISH_RATE_WINDOW_MS=60000
 ```
 
 ## Run
@@ -44,6 +48,72 @@ Health check:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:4100/health
+```
+
+Test:
+
+```powershell
+npm test
+```
+
+## Production Environment
+
+Use strong, different secrets for the internal publish key and socket token signing secret:
+
+```dotenv
+NODE_ENV=production
+PORT=4100
+HOST=0.0.0.0
+CORS_ORIGIN=https://your-domain.example
+INTERNAL_API_KEY=long-random-server-to-server-key
+SOCKET_AUTH_SECRET=long-random-token-signing-secret
+ALLOW_UNSIGNED_AUTH=false
+PUBLISH_RATE_LIMIT=120
+PUBLISH_RATE_WINDOW_MS=60000
+```
+
+When `NODE_ENV=production`, startup fails if unsigned auth is enabled or required secrets are missing.
+
+## CORS
+
+`CORS_ORIGIN` is a comma-separated allowlist of browser origins. Use only the origin part, not the full page path:
+
+```dotenv
+# Good for XAMPP pages served at http://localhost/delivery/public
+CORS_ORIGIN=http://localhost,http://127.0.0.1
+
+# Good for Laravel dev server and Vite dev server
+CORS_ORIGIN=http://127.0.0.1:8000,http://localhost:8000,http://localhost:5173
+```
+
+For local debugging only, an empty value or `*` allows any origin. In production, set exact HTTPS origins and keep `ALLOW_UNSIGNED_AUTH=false`.
+
+## Process Manager Examples
+
+PM2:
+
+```powershell
+cd socket-server
+pm2 start src/server.js --name flowdrop-socket
+pm2 save
+```
+
+systemd example:
+
+```ini
+[Unit]
+Description=FlowDrop Socket Server
+After=network.target
+
+[Service]
+WorkingDirectory=/var/www/delivery/socket-server
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ## Publish Events From Laravel
@@ -82,6 +152,8 @@ The server emits to:
 Shortcut endpoints are also available:
 
 - `POST /events/order-updated`
+- `POST /events/payment`
+- `POST /events/cash-collection`
 - `POST /events/rider-location`
 - `POST /events/notification`
 
@@ -163,6 +235,7 @@ Known domain event mappings:
 | `order.updated` | `order:updated` |
 | `order.assigned` | `order:assigned` |
 | `order.status.updated` | `order:status-updated` |
+| `payment.updated` | `payment:updated` |
 | `cash.collection.updated` | `cash-collection:updated` |
 | `rider.location.updated` | `rider:location-updated` |
 | `notification.created` | `notification:created` |
@@ -175,3 +248,4 @@ Unknown publish types are emitted as-is.
 - This service does not replace Laravel notifications; it only broadcasts fresh events.
 - Laravel remains the source of truth for orders, riders, payments, and cash collections.
 - Clients should still refetch the API after receiving important events if exact state matters.
+- The server handles `SIGINT` and `SIGTERM` by closing Socket.IO and HTTP connections gracefully.

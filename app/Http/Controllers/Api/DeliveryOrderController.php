@@ -13,6 +13,7 @@ use App\Models\Rider;
 use App\Models\Shop;
 use App\Models\User;
 use App\Notifications\OrderActivityNotification;
+use App\Services\RealtimeSocketPublisher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -64,6 +65,8 @@ class DeliveryOrderController extends Controller
 
         $order = DB::transaction(function () use ($request, $clientUser) {
             $attributes = $request->validated();
+            $this->normalizeOptionalRequesterFields($attributes);
+            $this->normalizeOptionalDestinationFields($attributes);
             $attributes['client_user_id'] = $clientUser?->role === User::ROLE_CLIENT
                 ? $clientUser->id
                 : null;
@@ -122,7 +125,10 @@ class DeliveryOrderController extends Controller
             return $order;
         });
 
-        return response()->json($order->fresh()->load(['rider', 'clientUser', 'statusHistories', 'payments']), 201);
+        $freshOrder = $order->fresh()->load(['rider', 'clientUser', 'statusHistories', 'payments']);
+        app(RealtimeSocketPublisher::class)->orderCreated($freshOrder);
+
+        return response()->json($freshOrder, 201);
     }
 
     public function show(DeliveryOrder $deliveryOrder): JsonResponse
@@ -150,6 +156,9 @@ class DeliveryOrderController extends Controller
             ? $this->clientUpdateRules()
             : $this->officeUpdateRules()
         );
+
+        $this->normalizeOptionalRequesterFields($validated, false);
+        $this->normalizeOptionalDestinationFields($validated, false);
 
         if (array_key_exists('product_payment_method', $validated) && $validated['product_payment_method'] === 'already_paid') {
             $validated['cod_amount'] = 0;
@@ -184,7 +193,15 @@ class DeliveryOrderController extends Controller
             ]);
         });
 
-        return response()->json($deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories', 'payments', 'cashCollection']));
+        $freshOrder = $deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories', 'payments', 'cashCollection']);
+
+        if (array_key_exists('status', $validated) && $validated['status'] !== $previousStatus) {
+            app(RealtimeSocketPublisher::class)->orderStatusUpdated($freshOrder);
+        } else {
+            app(RealtimeSocketPublisher::class)->orderUpdated($freshOrder);
+        }
+
+        return response()->json($freshOrder);
     }
 
     public function destroy(Request $request, DeliveryOrder $deliveryOrder): JsonResponse
@@ -201,6 +218,7 @@ class DeliveryOrderController extends Controller
             'status',
             'payment_status',
             'rider_id',
+            'client_user_id',
         ]);
 
         DB::transaction(function () use ($deliveryOrder, $request, $snapshot, $rider) {
@@ -220,6 +238,8 @@ class DeliveryOrderController extends Controller
                 'metadata' => $snapshot,
             ]);
         });
+
+        app(RealtimeSocketPublisher::class)->orderDeleted($deliveryOrder->id, $snapshot);
 
         return response()->json(['message' => 'Delivery order deleted.']);
     }
@@ -248,17 +268,6 @@ class DeliveryOrderController extends Controller
         DB::transaction(function () use ($deliveryOrder, $rider, $validated) {
             $previousRiderId = $deliveryOrder->rider_id;
             $previousRider = $deliveryOrder->rider;
-
-            if ($deliveryOrder->status === 'pending') {
-                $deliveryOrder->update([
-                    'status' => 'approved',
-                    'approved_at' => now(),
-                ]);
-                $deliveryOrder->statusHistories()->create([
-                    'status' => 'approved',
-                    'actor_type' => 'office_admin',
-                ]);
-            }
 
             $deliveryOrder->update([
                 'rider_id' => $rider->id,
@@ -297,7 +306,10 @@ class DeliveryOrderController extends Controller
             }
         });
 
-        return response()->json($deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories']));
+        $freshOrder = $deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories']);
+        app(RealtimeSocketPublisher::class)->orderAssigned($freshOrder);
+
+        return response()->json($freshOrder);
     }
 
     public function updateStatus(
@@ -332,6 +344,16 @@ class DeliveryOrderController extends Controller
             };
 
             $updates = ['status' => $status] + $timestamps;
+
+            if ($status === 'picked_up') {
+                $updates['receiver_name'] = $validated['receiver_name'] ?? '';
+                $updates['receiver_phone'] = $validated['receiver_phone'];
+                $updates['receiver_address'] = $validated['receiver_address'];
+                $updates['product_payment_method'] = $validated['product_payment_method'] ?? 'already_paid';
+                $updates['cod_amount'] = $updates['product_payment_method'] === 'rider_collects'
+                    ? ($validated['cod_amount'] ?? 0)
+                    : 0;
+            }
 
             if ($status === 'completed') {
                 $deliveryFee = (float) $validated['delivery_fee'];
@@ -377,7 +399,10 @@ class DeliveryOrderController extends Controller
             }
         });
 
-        return response()->json($deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories', 'cashCollection']));
+        $freshOrder = $deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories', 'cashCollection']);
+        app(RealtimeSocketPublisher::class)->orderStatusUpdated($freshOrder);
+
+        return response()->json($freshOrder);
     }
 
     private function releaseRiderWhenIdle(Rider $rider, int $exceptOrderId): void
@@ -415,9 +440,9 @@ class DeliveryOrderController extends Controller
             'pickup_address' => ['sometimes', 'required', 'string', 'max:1000'],
             'pickup_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'pickup_longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'receiver_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'receiver_phone' => ['sometimes', 'required', 'string', 'max:30'],
-            'receiver_address' => ['sometimes', 'required', 'string', 'max:1000'],
+            'receiver_name' => ['nullable', 'string', 'max:255'],
+            'receiver_phone' => ['nullable', 'string', 'max:30'],
+            'receiver_address' => ['nullable', 'string', 'max:1000'],
             'receiver_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'receiver_longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'product_name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -438,18 +463,18 @@ class DeliveryOrderController extends Controller
     private function officeUpdateRules(): array
     {
         return [
-            'client_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'client_name' => ['nullable', 'string', 'max:255'],
             'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
             'shop_id' => ['nullable', 'integer', 'exists:shops,id'],
-            'client_phone' => ['sometimes', 'required', 'string', 'max:30'],
+            'client_phone' => ['nullable', 'string', 'max:30'],
             'pickup_contact_name' => ['sometimes', 'required', 'string', 'max:255'],
             'pickup_phone' => ['sometimes', 'required', 'string', 'max:30'],
             'pickup_address' => ['sometimes', 'required', 'string', 'max:1000'],
             'pickup_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'pickup_longitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'receiver_name' => ['sometimes', 'required', 'string', 'max:255'],
-            'receiver_phone' => ['sometimes', 'required', 'string', 'max:30'],
-            'receiver_address' => ['sometimes', 'required', 'string', 'max:1000'],
+            'receiver_name' => ['nullable', 'string', 'max:255'],
+            'receiver_phone' => ['nullable', 'string', 'max:30'],
+            'receiver_address' => ['nullable', 'string', 'max:1000'],
             'receiver_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'receiver_longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'product_name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -476,6 +501,24 @@ class DeliveryOrderController extends Controller
         $order->loadMissing('clientUser');
 
         $order->clientUser?->notify(new OrderActivityNotification($order, $kind, $title, $body, $meta));
+    }
+
+    private function normalizeOptionalDestinationFields(array &$attributes, bool $includeMissing = true): void
+    {
+        foreach (['receiver_name', 'receiver_phone', 'receiver_address'] as $field) {
+            if ($includeMissing || array_key_exists($field, $attributes)) {
+                $attributes[$field] = $attributes[$field] ?? '';
+            }
+        }
+    }
+
+    private function normalizeOptionalRequesterFields(array &$attributes, bool $includeMissing = true): void
+    {
+        foreach (['client_name', 'client_phone'] as $field) {
+            if ($includeMissing || array_key_exists($field, $attributes)) {
+                $attributes[$field] = $attributes[$field] ?? '';
+            }
+        }
     }
 
     private function notifyRider(Rider $rider, DeliveryOrder $order, string $kind, string $title, string $body, array $meta = []): void

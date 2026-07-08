@@ -43,6 +43,36 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
+    public function test_office_can_create_delivery_order_without_requester_or_destination_details()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $payload = $this->validOrderPayload();
+        unset(
+            $payload['client_name'],
+            $payload['client_phone'],
+            $payload['receiver_name'],
+            $payload['receiver_phone'],
+            $payload['receiver_address']
+        );
+
+        $this->postJson('/api/delivery-orders', $payload)
+            ->assertCreated()
+            ->assertJsonPath('client_name', '')
+            ->assertJsonPath('client_phone', '')
+            ->assertJsonPath('receiver_name', '')
+            ->assertJsonPath('receiver_phone', '')
+            ->assertJsonPath('receiver_address', '');
+
+        $this->assertDatabaseHas('delivery_orders', [
+            'client_name' => '',
+            'client_phone' => '',
+            'receiver_name' => '',
+            'receiver_phone' => '',
+            'receiver_address' => '',
+        ]);
+    }
+
     public function test_office_can_assign_an_available_rider()
     {
         $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
@@ -60,7 +90,7 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonPath('status', 'rider_assigned')
             ->assertJsonPath('rider.id', $rider->id);
 
-        $this->assertDatabaseHas('order_status_histories', [
+        $this->assertDatabaseMissing('order_status_histories', [
             'delivery_order_id' => $order->id,
             'status' => 'approved',
         ]);
@@ -202,6 +232,29 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonPath('cod_amount', '0.00');
     }
 
+    public function test_authenticated_client_can_create_delivery_request_without_destination_details()
+    {
+        $client = $this->createUser([
+            'email' => 'optional-destination-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+
+        Sanctum::actingAs($client);
+
+        $payload = $this->validOrderPayload();
+        unset($payload['receiver_name'], $payload['receiver_phone'], $payload['receiver_address']);
+
+        $this->postJson('/api/delivery-orders', array_merge($payload, [
+            'client_name' => $client->name,
+            'client_phone' => $client->phone,
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('client_user_id', $client->id)
+            ->assertJsonPath('receiver_name', '')
+            ->assertJsonPath('receiver_phone', '')
+            ->assertJsonPath('receiver_address', '');
+    }
+
     public function test_rider_cannot_skip_required_workflow_steps()
     {
         $riderUser = $this->actingAsRole(User::ROLE_RIDER);
@@ -224,6 +277,50 @@ class DeliveryOrderApiTest extends TestCase
             'actor_type' => 'rider',
             'actor_id' => $rider->id,
         ])->assertOk()->assertJsonPath('status', 'rider_accepted');
+    }
+
+    public function test_rider_pickup_updates_destination_and_cod_details()
+    {
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'status' => 'busy',
+            'user_id' => $riderUser->id,
+        ]);
+        $order = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'status' => 'rider_accepted',
+            'receiver_name' => '',
+            'receiver_phone' => '',
+            'receiver_address' => '',
+            'product_payment_method' => 'already_paid',
+            'cod_amount' => 0,
+            'rider_id' => $rider->id,
+        ]));
+
+        $this->patchJson("/api/delivery-orders/{$order->id}/status", [
+            'status' => 'picked_up',
+            'receiver_name' => 'Daw Hnin',
+            'receiver_phone' => '09 555 222 777',
+            'receiver_address' => 'Bahan Street, Yangon',
+            'product_payment_method' => 'rider_collects',
+            'cod_amount' => 12500,
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'picked_up')
+            ->assertJsonPath('receiver_name', 'Daw Hnin')
+            ->assertJsonPath('receiver_phone', '09 555 222 777')
+            ->assertJsonPath('receiver_address', 'Bahan Street, Yangon')
+            ->assertJsonPath('product_payment_method', 'rider_collects')
+            ->assertJsonPath('cod_amount', '12500.00');
+
+        $this->assertDatabaseHas('delivery_orders', [
+            'id' => $order->id,
+            'status' => 'picked_up',
+            'receiver_phone' => '09 555 222 777',
+            'receiver_address' => 'Bahan Street, Yangon',
+            'product_payment_method' => 'rider_collects',
+            'cod_amount' => 12500,
+        ]);
     }
 
     public function test_rider_cannot_progress_an_order_assigned_to_another_rider()

@@ -161,6 +161,14 @@ function RiderHistory({ onOpen, orders }) {
 function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress }) {
   const [completing, setCompleting] = useState(false);
   const [feeInput, setFeeInput] = useState("");
+  const [pickupOpen, setPickupOpen] = useState(false);
+  const [pickupForm, setPickupForm] = useState({
+    receiver: order.receiver || "",
+    receiverPhone: order.receiverPhone || "",
+    destination: order.destination || "",
+    codEnabled: Boolean(order.codEnabled),
+    cod: order.cod ?? "",
+  });
   const [issueOpen, setIssueOpen] = useState(false);
   const [issueNote, setIssueNote] = useState("");
   const [actionError, setActionError] = useState("");
@@ -192,6 +200,11 @@ function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress
       return;
     }
 
+    if (action[1] === "picked_up") {
+      setPickupOpen(true);
+      return;
+    }
+
     setProgressing(true);
 
     try {
@@ -200,6 +213,27 @@ function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress
       setActionError(errorMessage(error));
     } finally {
       setProgressing(false);
+    }
+  };
+
+  const confirmPickup = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setActionError("");
+
+    try {
+      await onProgress(order.id, "picked_up", undefined, "", {
+        receiver_name: pickupForm.receiver,
+        receiver_phone: pickupForm.receiverPhone,
+        receiver_address: pickupForm.destination,
+        product_payment_method: pickupForm.codEnabled ? "rider_collects" : "already_paid",
+        cod_amount: pickupForm.codEnabled ? Number(pickupForm.cod || 0) : 0,
+      });
+      setPickupOpen(false);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -288,6 +322,75 @@ function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress
           </button>
         </div>
       )}
+      {pickupOpen && (
+        <div className="modal-backdrop">
+          <form className="operation-modal glass rider-complete-modal rider-pickup-modal" onSubmit={confirmPickup}>
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">PICK UP</p>
+                <h2>Destination and COD</h2>
+              </div>
+              <button className="icon-btn" onClick={() => setPickupOpen(false)} type="button"><Icon name="close" /></button>
+            </div>
+            <p className="muted">Confirm destination details and product payment before pickup.</p>
+            {actionError && <p className="auth-error">{actionError}</p>}
+            <div className="rider-pickup-fields">
+              <label className="form-field">
+                <span>Destination name</span>
+                <input
+                  onChange={(event) => setPickupForm((current) => ({ ...current, receiver: event.target.value }))}
+                  value={pickupForm.receiver}
+                />
+              </label>
+              <label className="form-field">
+                <span>Destination phone</span>
+                <input
+                  inputMode="tel"
+                  onChange={(event) => setPickupForm((current) => ({ ...current, receiverPhone: event.target.value }))}
+                  required
+                  value={pickupForm.receiverPhone}
+                />
+              </label>
+              <label className="form-field">
+                <span>Destination address</span>
+                <input
+                  onChange={(event) => setPickupForm((current) => ({ ...current, destination: event.target.value }))}
+                  required
+                  value={pickupForm.destination}
+                />
+              </label>
+              <label className="switch-row glass">
+                <span><strong>Product COD</strong><small>Collect product payment from receiver</small></span>
+                <input
+                  checked={pickupForm.codEnabled}
+                  onChange={(event) => setPickupForm((current) => ({ ...current, codEnabled: event.target.checked }))}
+                  type="checkbox"
+                />
+                <i />
+              </label>
+              {pickupForm.codEnabled && (
+                <label className="form-field">
+                  <span>COD amount (MMK)</span>
+                  <input
+                    inputMode="numeric"
+                    min="0"
+                    onChange={(event) => setPickupForm((current) => ({ ...current, cod: event.target.value }))}
+                    required
+                    type="number"
+                    value={pickupForm.cod}
+                  />
+                </label>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button className="btn secondary" onClick={() => setPickupOpen(false)} type="button">Cancel</button>
+              <button className="btn primary grow" disabled={submitting} type="submit">
+                {submitting ? "Saving..." : "Pick up"} <Icon name="check" size={16} />
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {completing && (
         <div className="modal-backdrop">
           <form className="operation-modal glass rider-complete-modal" onSubmit={confirmComplete}>
@@ -299,6 +402,19 @@ function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress
               <button className="icon-btn" onClick={() => setCompleting(false)} type="button"><Icon name="close" /></button>
             </div>
             <p className="muted">Enter the cash amount collected from the client for this delivery.</p>
+            <div className={`complete-cod-summary ${order.codEnabled ? "active" : ""}`}>
+              <span><Icon name="wallet" size={16} /></span>
+              <div>
+                <small>Product COD</small>
+                <strong>{order.codEnabled ? "On" : "Off"}</strong>
+              </div>
+              {order.codEnabled && (
+                <div>
+                  <small>COD amount</small>
+                  <strong>{money(order.cod)}</strong>
+                </div>
+              )}
+            </div>
             {actionError && <p className="auth-error">{actionError}</p>}
             <label className="field-label">Delivery fee (MMK)</label>
             <div className="fee-amount-input">

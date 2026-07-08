@@ -30,4 +30,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'socket_server' => [
+        'enabled' => env('SOCKET_SERVER_ENABLED', true),
+        'url' => env('SOCKET_SERVER_URL', 'http://127.0.0.1:4100'),
+        'key' => env('SOCKET_SERVER_KEY', env('INTERNAL_API_KEY')),
+        'timeout' => env('SOCKET_SERVER_TIMEOUT', 2),
+    ],
+
 ];

@@ -541,7 +541,7 @@ function NewRequest({ addresses = [], initialOrder = null, mode = "create", onCa
     step === 1
       ? form.pickupContact && form.pickupPhone && form.pickup
       : step === 2
-        ? form.receiver && form.receiverPhone && form.destination
+        ? true
         : step === 3
           ? form.product
           : true;
@@ -605,7 +605,7 @@ function NewRequest({ addresses = [], initialOrder = null, mode = "create", onCa
         )}
         {step === 2 && (
           <>
-            <FormIntro icon="navigation" title="Where are we delivering?" text="Enter the receiver's contact information." />
+            <FormIntro icon="navigation" title="Where are we delivering?" text="Add destination details now or let the rider confirm them at pickup." />
             {addresses.length > 0 && (
               <div className="saved-address-strip">
                 {addresses.map((address) => (
@@ -616,9 +616,9 @@ function NewRequest({ addresses = [], initialOrder = null, mode = "create", onCa
                 ))}
               </div>
             )}
-            <TextField label="Receiver name" onChange={(value) => update("receiver", value)} placeholder="Full name" value={form.receiver} />
-            <TextField inputMode="tel" label="Receiver phone number" onChange={(value) => update("receiverPhone", value)} placeholder="09 xxx xxx xxx" value={form.receiverPhone} />
-            <TextField label="Delivery address" onChange={(value) => update("destination", value)} placeholder="Street, township" value={form.destination} />
+            <TextField label="Receiver name (optional)" onChange={(value) => update("receiver", value)} placeholder="Full name" value={form.receiver} />
+            <TextField inputMode="tel" label="Receiver phone number (optional)" onChange={(value) => update("receiverPhone", value)} placeholder="09 xxx xxx xxx" value={form.receiverPhone} />
+            <TextField label="Delivery address (optional)" onChange={(value) => update("destination", value)} placeholder="Street, township" value={form.destination} />
           </>
         )}
         {step === 3 && (
@@ -653,7 +653,6 @@ function NewRequest({ addresses = [], initialOrder = null, mode = "create", onCa
                 </button>
               ))}
             </div>
-            <TextField inputMode="numeric" label="Estimated delivery fee (optional)" onChange={(value) => update("fee", value)} placeholder="Leave blank - rider sets final fee" value={form.fee} />
             <label className="switch-row glass">
               <span><strong>COD cash on delivery</strong><small>Rider collects product payment from receiver</small></span>
               <input checked={form.codEnabled} onChange={(event) => update("codEnabled", event.target.checked)} type="checkbox" />
@@ -667,7 +666,7 @@ function NewRequest({ addresses = [], initialOrder = null, mode = "create", onCa
             <ReviewSection label="Pickup" title={form.pickupContact} lines={[form.pickupPhone, form.pickup]} />
             <ReviewSection label="Delivery" title={form.receiver} lines={[form.receiverPhone, form.destination]} />
             <ReviewSection label="Product" title={form.product} lines={[`${form.quantity} item(s) - ${form.category}`, form.fragile ? "Fragile handling required" : "Standard handling"]} />
-            <ReviewSection label="Payment" title={form.paymentMethod} lines={[form.fee ? `Optional estimate: ${Number(form.fee).toLocaleString()} MMK` : "Final fee set by rider after delivery", `Product COD: ${form.codEnabled ? "On" : "Off"}`]} />
+            <ReviewSection label="Payment" title={form.paymentMethod} lines={["Final fee set by rider after delivery", `Product COD: ${form.codEnabled ? "On" : "Off"}`]} />
           </>
         )}
       </div>
@@ -725,15 +724,15 @@ function ReviewSection({ label, title, lines }) {
 
 function TrackingView({ order, onBack, onDelete, onEdit }) {
   if (!order) return null;
-  const steps = ["pending", "rider_assigned", "picked_up", "going_to_delivery", "delivered"];
+  const steps = ["pending", "rider_assigned", "rider_accepted", "picked_up", "delivered"];
   const trackingIndex = {
     pending: 0,
     approved: 0,
     rider_assigned: 1,
-    rider_accepted: 1,
+    rider_accepted: 2,
     going_to_pickup: 1,
     arrived_at_pickup: 1,
-    picked_up: 2,
+    picked_up: 3,
     going_to_delivery: 3,
     arrived_at_delivery: 3,
     delivered: 4,

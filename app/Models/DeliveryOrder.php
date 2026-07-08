@@ -30,14 +30,14 @@ class DeliveryOrder extends Model
     ];
 
     public const TRANSITIONS = [
-        'pending' => ['approved', 'cancelled'],
+        'pending' => ['rider_assigned', 'cancelled'],
         'approved' => ['rider_assigned', 'cancelled'],
         'rider_assigned' => ['rider_accepted', 'failed', 'cancelled'],
-        'rider_accepted' => ['going_to_pickup', 'failed', 'cancelled'],
-        'going_to_pickup' => ['arrived_at_pickup', 'failed', 'cancelled'],
+        'rider_accepted' => ['picked_up', 'failed', 'cancelled'],
+        'going_to_pickup' => ['picked_up', 'failed', 'cancelled'],
         'arrived_at_pickup' => ['picked_up', 'failed', 'cancelled'],
-        'picked_up' => ['going_to_delivery', 'failed', 'cancelled'],
-        'going_to_delivery' => ['arrived_at_delivery', 'failed', 'cancelled'],
+        'picked_up' => ['delivered', 'failed', 'cancelled'],
+        'going_to_delivery' => ['delivered', 'failed', 'cancelled'],
         'arrived_at_delivery' => ['delivered', 'failed', 'cancelled'],
         'delivered' => ['completed'],
         'completed' => [],

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminLog;
 use App\Models\Rider;
 use App\Models\User;
+use App\Services\RealtimeSocketPublisher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -143,6 +144,8 @@ class RiderController extends Controller
             'last_active_at' => $location->recorded_at,
             'status' => $rider->status === 'offline' ? 'online' : $rider->status,
         ]);
+
+        app(RealtimeSocketPublisher::class)->riderLocationUpdated($location);
 
         return response()->json($location, 201);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   assignDeliveryOrder,
   configureApi,
@@ -53,6 +53,7 @@ import { Icon } from "./icons";
 import { ClientPortal } from "./portals/ClientPortal";
 import { RiderPortal } from "./portals/RiderPortal";
 import { AdminPortal } from "./portals/AdminPortal";
+import { createRealtimeConnection } from "./realtime";
 import { applyPublicSettings, useStoredState } from "./utils";
 
 const portals = new Set(["client", "rider", "admin"]);
@@ -169,7 +170,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     };
   }, [auth?.token]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!hasPortalAccess) {
       return;
     }
@@ -206,11 +207,24 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [hasPortalAccess, portal, publicSettingsHandlers]);
 
   useEffect(() => {
     loadData();
-  }, [hasPortalAccess, portal]);
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!hasPortalAccess) {
+      return undefined;
+    }
+
+    return createRealtimeConnection({
+      auth,
+      orders,
+      riders,
+      onRefresh: loadData,
+    });
+  }, [auth, hasPortalAccess, loadData, orders, riders]);
 
   const submitOrder = async (order) => {
     const submittedOrder = await createDeliveryOrder(order);
@@ -429,14 +443,14 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     setReportData(await fetchReportSummary());
   };
 
-  const progressOrder = async (orderId, status, deliveryFee, note = "") => {
+  const progressOrder = async (orderId, status, deliveryFee, note = "", details = {}) => {
     const order = orders.find((item) => item.id === orderId);
 
     if (!order?._apiId) {
       return;
     }
 
-    const updatedOrder = await updateDeliveryOrderStatus(order, status, deliveryFee, note);
+    const updatedOrder = await updateDeliveryOrderStatus(order, status, deliveryFee, note, details);
 
     setOrders((current) => current.map((item) => item.id === orderId ? updatedOrder : item));
     setNotifications(await fetchNotifications());

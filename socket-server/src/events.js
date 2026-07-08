@@ -3,6 +3,7 @@ const eventTypeMap = {
   "order.updated": "order:updated",
   "order.assigned": "order:assigned",
   "order.status.updated": "order:status-updated",
+  "payment.updated": "payment:updated",
   "cash.collection.updated": "cash-collection:updated",
   "rider.location.updated": "rider:location-updated",
   "notification.created": "notification:created",
@@ -47,7 +48,7 @@ function resolveRooms(event) {
     rooms.add("office");
   }
 
-  addRoom(rooms, "order", recipients.orderId || recipients.order_id || data.orderId || data.order_id || data.id);
+  addRoom(rooms, "order", resolveOrderId(event));
   addRoom(rooms, "client", recipients.clientUserId || recipients.client_user_id || data.clientUserId || data.client_user_id);
   addRoom(rooms, "rider", recipients.riderId || recipients.rider_id || data.riderId || data.rider_id);
   addRoom(rooms, "user", recipients.userId || recipients.user_id || data.userId || data.user_id);
@@ -59,6 +60,21 @@ function resolveRooms(event) {
   });
 
   return [...rooms];
+}
+
+function resolveOrderId(event) {
+  const data = event.data || {};
+  const recipients = event.recipients || {};
+
+  return recipients.orderId ||
+    recipients.order_id ||
+    data.orderId ||
+    data.order_id ||
+    (isOrderEvent(event) ? data.id : null);
+}
+
+function isOrderEvent(event) {
+  return event.type?.startsWith("order.") || event.name?.startsWith("order:");
 }
 
 function addRoom(rooms, prefix, value) {

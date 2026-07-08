@@ -15,6 +15,7 @@ export function configureApi({ baseUrl, token, onUnauthorized } = {}) {
 
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData;
+  const method = options.method || "GET";
   const response = await fetch(`${apiConfig.baseUrl}${path}`, {
     headers: {
       Accept: "application/json",
@@ -26,6 +27,11 @@ async function request(path, options = {}) {
   });
 
   if (!response.ok) {
+    console.warn("[api] request_failed", {
+      method,
+      path,
+      status: response.status,
+    });
     const error = new Error(`API request failed with status ${response.status}`);
     error.response = response;
     try {
@@ -38,6 +44,12 @@ async function request(path, options = {}) {
     }
     throw error;
   }
+
+  console.info("[api] request_success", {
+    method,
+    path,
+    status: response.status,
+  });
 
   return response.json();
 }
@@ -197,22 +209,22 @@ export function mapOrder(order) {
     id: order.code,
     createdAt: order.created_at ? new Date(order.created_at).toLocaleString() : "Just now",
     updatedAt: order.updated_at ? new Date(order.updated_at).toLocaleString() : "Just now",
-    client: order.client_name,
-    clientPhone: order.client_phone,
+    client: order.client_name || "",
+    clientPhone: order.client_phone || "",
     creatorType: order.client_user_id ? "client" : "office",
     creatorUserId: order.client_user_id || "",
     creatorAccountName: order.client_user?.name || "",
     creatorAccountPhone: order.client_user?.phone || "",
     creatorAccountEmail: order.client_user?.email || "",
-    creatorName: order.client_user?.name || order.client_name,
-    creatorPhone: order.client_user?.phone || order.client_phone,
+    creatorName: order.client_user?.name || order.client_name || "",
+    creatorPhone: order.client_user?.phone || order.client_phone || "",
     creatorEmail: order.client_user?.email || "",
     pickup: order.pickup_address,
     pickupContact: order.pickup_contact_name,
     pickupPhone: order.pickup_phone,
-    destination: order.receiver_address,
-    receiver: order.receiver_name,
-    receiverPhone: order.receiver_phone,
+    destination: order.receiver_address || "",
+    receiver: order.receiver_name || "",
+    receiverPhone: order.receiver_phone || "",
     product: order.product_name,
     category: order.product_category || "Package",
     quantity: order.quantity,
@@ -380,6 +392,7 @@ export function mapPayment(payment) {
 export function mapRider(rider) {
   return {
     _apiId: rider.id,
+    userId: rider.user_id || "",
     id: rider.code,
     name: rider.name,
     initials: initials(rider.name),
@@ -716,10 +729,11 @@ export async function assignDeliveryOrder(order, rider) {
   return mapOrder(response);
 }
 
-export async function updateDeliveryOrderStatus(order, status, deliveryFee, note = "") {
+export async function updateDeliveryOrderStatus(order, status, deliveryFee, note = "", details = {}) {
   const body = {
     status,
     actor_type: "rider",
+    ...details,
   };
 
   if (deliveryFee !== undefined && deliveryFee !== null) {

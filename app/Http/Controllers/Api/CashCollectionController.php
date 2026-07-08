@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminLog;
 use App\Models\CashCollection;
 use App\Models\Rider;
+use App\Services\RealtimeSocketPublisher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -50,7 +51,10 @@ class CashCollectionController extends Controller
             return $collection;
         });
 
-        return response()->json($collection->fresh()->load(['deliveryOrder', 'rider']), 201);
+        $freshCollection = $collection->fresh()->load(['deliveryOrder', 'rider']);
+        app(RealtimeSocketPublisher::class)->cashCollectionUpdated($freshCollection);
+
+        return response()->json($freshCollection, 201);
     }
 
     public function show(CashCollection $cashCollection): JsonResponse
@@ -94,7 +98,10 @@ class CashCollectionController extends Controller
             ]);
         });
 
-        return response()->json($cashCollection->fresh()->load(['deliveryOrder', 'rider']));
+        $freshCollection = $cashCollection->fresh()->load(['deliveryOrder', 'rider']);
+        app(RealtimeSocketPublisher::class)->cashCollectionUpdated($freshCollection);
+
+        return response()->json($freshCollection);
     }
 
     public function destroy(Request $request, CashCollection $cashCollection): JsonResponse
@@ -121,6 +128,8 @@ class CashCollectionController extends Controller
                 'metadata' => $snapshot,
             ]);
         });
+
+        app(RealtimeSocketPublisher::class)->cashCollectionDeleted($id, $snapshot);
 
         return response()->json(['message' => 'Cash collection deleted.']);
     }

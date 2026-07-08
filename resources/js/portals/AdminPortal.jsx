@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
-import { formatSettingValue, searchCustomers, searchShops, settingValueForInput } from "../api";
+import { formatSettingValue, settingValueForInput } from "../api";
 import { activeStatuses, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { AddressBlock, CreatorSourceBadge, formatOrderCreator, Logo, StatusBadge, ThemeControl } from "../components/shared";
-import { SearchableRecordPicker } from "../components/SearchableRecordPicker";
 import { AdminReports } from "./admin/AdminReports";
 
 export function AdminPortal({
@@ -291,7 +290,7 @@ function exportOrdersCsv(orders) {
 }
 
 function OrderFilters({ filters, onChange, riders }) {
-  const statuses = ["pending", "approved", "rider_assigned", "going_to_pickup", "picked_up", "delivered", "completed", "failed", "cancelled"];
+  const statuses = ["pending", "rider_assigned", "rider_accepted", "picked_up", "delivered", "completed", "failed", "cancelled"];
   const paymentStatuses = ["unpaid", "pending_approval", "paid", "rejected", "refunded"];
   const update = (key, value) => onChange({ ...filters, [key]: value });
 
@@ -737,8 +736,8 @@ function OrderDrawer({ cashCollections = [], order, riders, close, onAssign, onC
       </section>
       <section>
         <p className="eyebrow">CONTACTS</p>
-        <div className="detail-row"><span>Requester</span><strong>{order.client}</strong></div>
-        <div className="detail-row"><span>Requester phone</span><strong>{order.clientPhone}</strong></div>
+        {order.client && <div className="detail-row"><span>Requester</span><strong>{order.client}</strong></div>}
+        {order.clientPhone && <div className="detail-row"><span>Requester phone</span><strong>{order.clientPhone}</strong></div>}
         <div className="detail-row"><span>Pickup</span><strong>{order.pickupContact}</strong></div>
         <div className="detail-row"><span>Pickup phone</span><strong>{order.pickupPhone}</strong></div>
         <div className="detail-row"><span>Receiver</span><strong>{order.receiver}</strong></div>
@@ -938,83 +937,8 @@ function OrderEditorModal({ close, onSave, order }) {
     note: order.note || "",
     internalNote: order.internalNote || "",
   });
-  const [selectedCustomer, setSelectedCustomer] = useState(
-    form.customerId
-      ? { _apiId: form.customerId, name: order.customerName || order.client, phone: order.clientPhone }
-      : null,
-  );
-  const [selectedShop, setSelectedShop] = useState(
-    form.shopId
-      ? { _apiId: form.shopId, name: order.shopName || order.pickupContact, phone: order.pickupPhone, address: order.pickup }
-      : null,
-  );
   const [submitting, setSubmitting] = useState(false);
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-
-  const searchClientRecords = useCallback(
-    (search) => searchCustomers({ search, perPage: 15 }),
-    [],
-  );
-  const searchPickupRecords = useCallback(
-    (search) => searchShops({
-      search,
-      customerId: form.customerId || "",
-      perPage: 15,
-      status: "",
-    }),
-    [form.customerId],
-  );
-
-  const chooseCustomer = (customer) => {
-    if (!customer) {
-      setSelectedCustomer(null);
-      setForm((current) => ({ ...current, customerId: "" }));
-      return;
-    }
-
-    setSelectedCustomer(customer);
-    setForm((current) => ({
-      ...current,
-      customerId: customer._apiId,
-      client: customer.name || current.client,
-      clientPhone: customer.phone || current.clientPhone,
-      shopId: "",
-      pickupContact: current.pickupContact,
-      pickupPhone: current.pickupPhone,
-      pickup: current.pickup,
-    }));
-    setSelectedShop(null);
-  };
-
-  const chooseShop = (shop) => {
-    if (!shop) {
-      setSelectedShop(null);
-      setForm((current) => ({ ...current, shopId: "" }));
-      return;
-    }
-
-    setSelectedShop(shop);
-    setForm((current) => ({
-      ...current,
-      shopId: shop._apiId,
-      pickupContact: shop.contactName || shop.name || current.pickupContact,
-      pickupPhone: shop.phone || current.pickupPhone,
-      pickup: shop.address || current.pickup,
-    }));
-  };
-
-  const buildPayload = () => {
-    if (!isNewOrder) {
-      return form;
-    }
-
-    return {
-      ...form,
-      receiver: form.receiver || form.client,
-      receiverPhone: form.receiverPhone || form.clientPhone,
-      destination: form.destination || form.pickup,
-    };
-  };
 
   return (
     <div className="modal-backdrop">
@@ -1023,7 +947,7 @@ function OrderEditorModal({ close, onSave, order }) {
         onSubmit={async (event) => {
           event.preventDefault();
           setSubmitting(true);
-          await onSave(buildPayload());
+          await onSave(form);
           setSubmitting(false);
         }}
       >
@@ -1049,49 +973,18 @@ function OrderEditorModal({ close, onSave, order }) {
               </div>
             </section>
           )}
-          <section className="order-record-pickers span-2">
-            <p className="eyebrow">QUICK FILL</p>
-            <div className="record-picker-stack">
-              <SearchableRecordPicker
-                emptyHint="Search customer name, phone, or email."
-                getOptionMeta={(customer) => [customer.phone, customer.email].filter(Boolean).join(" · ")}
-                getOptionTitle={(customer) => customer.name}
-                label="Customer record"
-                onClear={() => chooseCustomer(null)}
-                onSelect={chooseCustomer}
-                placeholder="Search customer..."
-                searchRecords={searchClientRecords}
-                selectedMeta={selectedCustomer ? [selectedCustomer.phone, selectedCustomer.email].filter(Boolean).join(" · ") : ""}
-                selectedTitle={selectedCustomer?.name || order.customerName}
-                value={form.customerId}
-              />
-              <SearchableRecordPicker
-                emptyHint="Search pickup name, phone, or address."
-                getOptionMeta={(shop) => [shop.phone, shop.address].filter(Boolean).join(" · ")}
-                getOptionTitle={(shop) => shop.name}
-                label="Saved pickup address"
-                onClear={() => chooseShop(null)}
-                onSelect={chooseShop}
-                placeholder="Search pickup..."
-                searchRecords={searchPickupRecords}
-                selectedMeta={selectedShop ? [selectedShop.phone, selectedShop.address].filter(Boolean).join(" · ") : ""}
-                selectedTitle={selectedShop?.name || order.shopName || order.pickupContact}
-                value={form.shopId}
-              />
-            </div>
-          </section>
-          <CrudField label="Requester name" onChange={(value) => update("client", value)} required value={form.client} />
-          <CrudField label="Requester phone" onChange={(value) => update("clientPhone", value)} required value={form.clientPhone} />
+          {!isNewOrder && (
+            <>
+              <CrudField label="Requester name" onChange={(value) => update("client", value)} value={form.client} />
+              <CrudField label="Requester phone" onChange={(value) => update("clientPhone", value)} value={form.clientPhone} />
+            </>
+          )}
           <CrudField label="Pickup contact" onChange={(value) => update("pickupContact", value)} required value={form.pickupContact} />
           <CrudField label="Pickup phone" onChange={(value) => update("pickupPhone", value)} required value={form.pickupPhone} />
           <CrudField className="span-2" label="Pickup address" onChange={(value) => update("pickup", value)} required value={form.pickup} />
-          {!isNewOrder && (
-            <>
-              <CrudField label="Receiver" onChange={(value) => update("receiver", value)} required value={form.receiver} />
-              <CrudField label="Receiver phone" onChange={(value) => update("receiverPhone", value)} required value={form.receiverPhone} />
-              <CrudField className="span-2" label="Delivery address" onChange={(value) => update("destination", value)} required value={form.destination} />
-            </>
-          )}
+          <CrudField label="Destination name" onChange={(value) => update("receiver", value)} value={form.receiver} />
+          <CrudField label="Destination phone" onChange={(value) => update("receiverPhone", value)} value={form.receiverPhone} />
+          <CrudField className="span-2" label="Destination address" onChange={(value) => update("destination", value)} value={form.destination} />
           <CrudField label="Product" onChange={(value) => update("product", value)} required value={form.product} />
           <CrudField label="Category" onChange={(value) => update("category", value)} value={form.category} />
           <CrudField inputMode="numeric" label="Quantity" onChange={(value) => update("quantity", value)} value={form.quantity} />
@@ -1110,7 +1003,7 @@ function OrderEditorModal({ close, onSave, order }) {
           {form.codEnabled && (
             <CrudField inputMode="numeric" label="COD amount (MMK)" onChange={(value) => update("cod", value)} value={form.cod} />
           )}
-          <CrudSelect label="Order status" onChange={(value) => update("status", value)} options={["pending", "approved", "rider_assigned", "rider_accepted", "going_to_pickup", "arrived_at_pickup", "picked_up", "going_to_delivery", "arrived_at_delivery", "delivered", "completed", "failed", "cancelled"]} value={form.status} />
+          <CrudSelect label="Order status" onChange={(value) => update("status", value)} options={["pending", "rider_assigned", "rider_accepted", "picked_up", "delivered", "completed", "failed", "cancelled"]} value={form.status} />
           <CrudSelect label="Fee status" onChange={(value) => update("paymentStatus", value)} options={["unpaid", "paid"]} value={form.paymentStatus} />
           <CrudField className="span-2" label="Client note" onChange={(value) => update("note", value)} value={form.note} />
           <CrudField className="span-2" label="Internal note" onChange={(value) => update("internalNote", value)} value={form.internalNote} />

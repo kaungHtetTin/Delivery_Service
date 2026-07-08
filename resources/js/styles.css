@@ -375,6 +375,15 @@ td strong, td small { display: block; } td small { margin-top: 3px; }
 .operation-modal > .crud-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: 4px; }
 .rider-complete-modal { width: min(92vw, 430px); padding-top: 18px; }
 .rider-complete-modal > .muted { margin-bottom: 15px; }
+.rider-pickup-modal { max-height: min(90vh, 680px); }
+.rider-pickup-fields { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 2px 18px; }
+.rider-pickup-fields .switch-row { margin-bottom: 13px; }
+.complete-cod-summary { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; margin: 0 0 14px; padding: 10px; background: var(--color-surface-soft); border: 1px solid var(--color-border); border-radius: 8px; }
+.complete-cod-summary.active { grid-template-columns: auto 1fr 1fr; background: rgb(222 150 0 / 9%); border-color: rgb(222 150 0 / 28%); }
+.complete-cod-summary > span { display: grid; width: 32px; height: 32px; color: var(--color-primary); background: rgb(8 127 116 / 10%); border-radius: 8px; place-items: center; }
+.complete-cod-summary.active > span { color: #9a5700; background: rgb(222 150 0 / 16%); }
+.complete-cod-summary small { display: block; color: var(--color-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.complete-cod-summary strong { display: block; margin-top: 2px; font-size: 14px; }
 .fee-amount-input { display: grid; grid-template-columns: 38px minmax(0, 1fr) max-content; gap: 8px; align-items: center; min-height: 58px; margin-bottom: 18px; padding: 8px 11px 8px 10px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%); transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
 .fee-amount-input:focus-within { background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface)); border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-soft); }
 .fee-amount-input > .icon { display: grid; width: 34px; height: 34px; color: var(--color-primary); background: var(--color-primary-soft); border-radius: 7px; place-items: center; }

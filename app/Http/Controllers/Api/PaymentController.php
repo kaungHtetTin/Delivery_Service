@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminLog;
 use App\Models\Payment;
 use App\Notifications\OrderActivityNotification;
+use App\Services\RealtimeSocketPublisher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -56,7 +57,10 @@ class PaymentController extends Controller
             return $payment;
         });
 
-        return response()->json($payment->fresh()->load('deliveryOrder.rider'), 201);
+        $freshPayment = $payment->fresh()->load('deliveryOrder.rider');
+        app(RealtimeSocketPublisher::class)->paymentUpdated($freshPayment);
+
+        return response()->json($freshPayment, 201);
     }
 
     public function show(Payment $payment): JsonResponse
@@ -99,7 +103,10 @@ class PaymentController extends Controller
             ]);
         });
 
-        return response()->json($payment->fresh()->load('deliveryOrder.rider', 'reviewer'));
+        $freshPayment = $payment->fresh()->load('deliveryOrder.rider', 'reviewer');
+        app(RealtimeSocketPublisher::class)->paymentUpdated($freshPayment);
+
+        return response()->json($freshPayment);
     }
 
     public function destroy(Request $request, Payment $payment): JsonResponse
@@ -130,6 +137,8 @@ class PaymentController extends Controller
             ]);
         });
 
+        app(RealtimeSocketPublisher::class)->paymentDeleted($id, $snapshot);
+
         return response()->json(['message' => 'Payment deleted.']);
     }
 
@@ -147,7 +156,10 @@ class PaymentController extends Controller
         ]);
         $payment->deliveryOrder()->update(['payment_status' => 'pending_approval']);
 
-        return response()->json($payment->fresh()->load('deliveryOrder'));
+        $freshPayment = $payment->fresh()->load('deliveryOrder.rider');
+        app(RealtimeSocketPublisher::class)->paymentUpdated($freshPayment);
+
+        return response()->json($freshPayment->load('deliveryOrder'));
     }
 
     public function review(Request $request, Payment $payment): JsonResponse
@@ -198,6 +210,9 @@ class PaymentController extends Controller
             ));
         });
 
-        return response()->json($payment->fresh()->load('deliveryOrder.rider', 'deliveryOrder.payments'));
+        $freshPayment = $payment->fresh()->load('deliveryOrder.rider', 'deliveryOrder.payments');
+        app(RealtimeSocketPublisher::class)->paymentUpdated($freshPayment);
+
+        return response()->json($freshPayment);
     }
 }

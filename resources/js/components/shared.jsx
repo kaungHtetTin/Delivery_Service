@@ -234,7 +234,7 @@ export function formatOrderCreator(order) {
   return {
     isClient,
     badge: isClient ? "client" : "office",
-    title: isClient ? order.creatorAccountName || order.client : order.client,
+    title: isClient ? order.creatorAccountName || order.client : order.client || "Office entry",
     meta: isClient
       ? [order.creatorAccountPhone || order.clientPhone, order.creatorAccountEmail].filter(Boolean).join(" · ")
       : "Entered manually by office staff",
