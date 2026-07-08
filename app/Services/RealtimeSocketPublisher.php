@@ -145,19 +145,6 @@ class RealtimeSocketPublisher
             'client_user_id' => $order?->client_user_id,
             'delivery_fee_collected' => $collection->delivery_fee_collected,
             'total_cash_collected' => $collection->total_cash_collected,
-            'confirmed_at' => $collection->confirmed_at,
-        ]);
-    }
-
-    public function cashCollectionDeleted(int $collectionId, array $snapshot): void
-    {
-        $this->publish('cash.collection.deleted', array_merge([
-            'id' => $collectionId,
-            'cash_collection_id' => $collectionId,
-            'order_id' => $snapshot['delivery_order_id'] ?? null,
-        ], $snapshot), [
-            'order_id' => $snapshot['delivery_order_id'] ?? null,
-            'rider_id' => $snapshot['rider_id'] ?? null,
         ]);
     }
 

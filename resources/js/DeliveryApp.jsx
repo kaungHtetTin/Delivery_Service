@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   assignDeliveryOrder,
+  collectRiderHeldFees,
   configureApi,
-  createCashCollection,
   createClientAddress,
   createClientShop,
   createDeliveryOrder,
@@ -11,7 +11,6 @@ import {
   createCustomer,
   createUser,
   createRider,
-  deleteCashCollection,
   deleteClientAddress,
   deleteDeliveryOrder,
   deleteSetting,
@@ -19,7 +18,6 @@ import {
   deleteCustomer,
   deleteUser,
   deleteRider,
-  fetchCashCollections,
   fetchClientAddresses,
   fetchClientShops,
   fetchCustomers,
@@ -37,10 +35,10 @@ import {
   makeClientAddressDefault,
   markNotificationRead as markNotificationReadRequest,
   registerClient,
-  updateCashCollection,
   updateClientAddress,
   updateClientShop,
   updateClientProfile,
+  updateCurrentUserProfile,
   updateDeliveryOrderStatus,
   updateDeliveryOrder,
   updateSetting,
@@ -84,7 +82,6 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   const [auth, setAuth] = useStoredState("flowdrop.auth", null);
   const [orders, setOrders] = useState([]);
   const [riders, setRiders] = useState([]);
-  const [cashCollections, setCashCollections] = useState([]);
   const [clientAddresses, setClientAddresses] = useState([]);
   const [users, setUsers] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -114,7 +111,6 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     setAuth(null);
     setOrders([]);
     setRiders([]);
-    setCashCollections([]);
     setClientAddresses([]);
     setUsers([]);
     setCustomers([]);
@@ -193,7 +189,6 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
       }
 
       if (portal === "admin") {
-        setCashCollections(await fetchCashCollections());
         setUsers(await fetchUsers());
         setCustomers(await fetchCustomers());
         setShops(await fetchShops());
@@ -241,6 +236,25 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   const saveClientProfile = async (profile) => {
     const user = await updateClientProfile(profile);
     setAuth((current) => current ? { ...current, user } : current);
+
+    return user;
+  };
+
+  const saveCurrentUserProfile = async (profile) => {
+    const user = await updateCurrentUserProfile(profile);
+    setAuth((current) => current ? { ...current, user } : current);
+    setUsers((current) => current.map((item) => (
+      item._apiId === user.id
+        ? {
+            ...item,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            profilePhotoUrl: user.profile_photo_url || "",
+            role: user.role,
+          }
+        : item
+    )));
 
     return user;
   };
@@ -361,19 +375,22 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     setReportData(await fetchReportSummary());
   };
 
-  const saveCashCollection = async (collection) => {
-    const savedCollection = collection._apiId
-      ? await updateCashCollection(collection)
-      : await createCashCollection(collection);
+  const collectRiderFees = async (rider, settlement) => {
+    if (!rider?._apiId) {
+      return null;
+    }
 
-    setCashCollections((current) => [
-      savedCollection,
-      ...current.filter((item) => item.id !== savedCollection.id),
-    ]);
-    setRiders(await fetchRiders());
-    setReportData(await fetchReportSummary());
+    const response = await collectRiderHeldFees(rider, settlement);
 
-    return savedCollection;
+    setRiders((current) => current.map((item) => (
+      item.id === response.rider.id ? response.rider : item
+    )));
+
+    if (portal === "admin") {
+      setReportData(await fetchReportSummary());
+    }
+
+    return response;
   };
 
   const saveUser = async (user) => {
@@ -430,19 +447,6 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     setSettings((current) => current.filter((item) => item.id !== settingId));
   };
 
-  const removeCashCollection = async (collectionId) => {
-    const collection = cashCollections.find((item) => item.id === collectionId);
-
-    if (!collection?._apiId) {
-      return;
-    }
-
-    await deleteCashCollection(collection);
-    setCashCollections((current) => current.filter((item) => item.id !== collectionId));
-    setRiders(await fetchRiders());
-    setReportData(await fetchReportSummary());
-  };
-
   const progressOrder = async (orderId, status, deliveryFee, note = "", details = {}) => {
     const order = orders.find((item) => item.id === orderId);
 
@@ -459,7 +463,6 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
       setRiders(await fetchRiders());
 
       if (status === "completed" && portal === "admin") {
-        setCashCollections(await fetchCashCollections());
         setReportData(await fetchReportSummary());
       }
     }
@@ -552,10 +555,9 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
         <AdminPortal
           appName={appName}
           assignRider={assignRider}
-          cashCollections={cashCollections}
+          collectRiderFees={collectRiderFees}
           customers={customers}
           orders={orders}
-          removeCashCollection={removeCashCollection}
           removeCustomer={removeCustomer}
           removeOrder={removeOrder}
           removeSetting={removeSetting}
@@ -564,10 +566,10 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           removeRider={removeRider}
           reportData={reportData}
           riders={riders}
-          saveCashCollection={saveCashCollection}
           saveCustomer={saveCustomer}
           saveOrder={saveOrder}
           saveSetting={saveSetting}
+          saveProfile={saveCurrentUserProfile}
           saveShop={saveShop}
           saveUser={saveUser}
           saveRider={saveRider}
@@ -576,6 +578,8 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           selectedOrderId={selectedOrderId}
           setSelectedOrderId={setSelectedOrderId}
           themeProps={themeProps}
+          onLogout={handleLogout}
+          user={auth.user}
           users={users}
         />
       )}

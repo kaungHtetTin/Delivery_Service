@@ -9,7 +9,6 @@ const realtimeEvents = [
   "payment:updated",
   "payment.deleted",
   "cash-collection:updated",
-  "cash.collection.deleted",
   "rider:location-updated",
   "notification:created",
 ];

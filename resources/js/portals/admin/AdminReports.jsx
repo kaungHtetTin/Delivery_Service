@@ -31,11 +31,8 @@ export function AdminReports({ orders, reportData, riders }) {
     approvedAmount: reportData?.payments?.approved_amount ?? localSummary.payments.approvedAmount,
   };
   const cashSummary = {
-    totalCollected: reportData?.cash_collections?.total_collected ?? localSummary.cash.totalCollected,
-    confirmedAmount: reportData?.cash_collections?.confirmed_amount ?? localSummary.cash.confirmedAmount,
-    pendingAmount: reportData?.cash_collections?.pending_amount ?? localSummary.cash.pendingAmount,
-    confirmed: reportData?.cash_collections?.confirmed ?? 0,
-    pending: reportData?.cash_collections?.pending ?? 0,
+    riderCollected: reportData?.delivery_fees?.rider_collected ?? localSummary.cash.riderCollected,
+    records: reportData?.delivery_fees?.records ?? localSummary.cash.records,
     cashHeld: reportData?.riders?.reduce((total, rider) => total + Number(rider.cash_held || 0), 0) ?? localSummary.cash.cashHeld,
   };
   const riderRows = reportData?.riders || riders.map((rider) => ({
@@ -55,7 +52,7 @@ export function AdminReports({ orders, reportData, riders }) {
         <ReportMetric label="Active orders" value={ordersSummary.active} note="Still operating" />
         <ReportMetric label="Completed orders" value={ordersSummary.completed} note="Finished deliveries" />
         <ReportMetric label="Paid payments" value={paymentSummary.paid} note={money(paymentSummary.approvedAmount)} />
-        <ReportMetric label="Cash collected" value={money(cashSummary.totalCollected)} note="Delivery fees" />
+        <ReportMetric label="Rider-collected fees" value={money(cashSummary.riderCollected)} note={`${cashSummary.records} completed fee records`} />
         <ReportMetric label="Rider cash held" value={money(cashSummary.cashHeld)} note="Current balance" />
       </div>
 
@@ -82,11 +79,10 @@ export function AdminReports({ orders, reportData, riders }) {
           title="Delivery fee payments"
         />
         <ReportStatusPanel
-          eyebrow="CASH COLLECTION"
+          eyebrow="RIDER CASH"
           rows={[
-            ["Confirmed", `${cashSummary.confirmed} records`, money(cashSummary.confirmedAmount)],
-            ["Pending", `${cashSummary.pending} records`, money(cashSummary.pendingAmount)],
-            ["Total collected", money(cashSummary.totalCollected), "delivery fees"],
+            ["Fee records", cashSummary.records, "delivery fees"],
+            ["Collected by riders", money(cashSummary.riderCollected), "completed orders"],
             ["Held by riders", money(cashSummary.cashHeld), "current balance"],
           ]}
           title="Rider-collected fees"
@@ -95,7 +91,7 @@ export function AdminReports({ orders, reportData, riders }) {
 
       <div className="panel glass">
         <div className="panel-heading">
-          <div><p className="eyebrow">RIDER ACTIVITY</p><h2>Workload and collections</h2></div>
+          <div><p className="eyebrow">RIDER ACTIVITY</p><h2>Workload and cash held</h2></div>
         </div>
         <div className="table-wrap">
           <table>
@@ -142,11 +138,10 @@ function buildLocalSummary(orders, riders) {
         .reduce((total, order) => total + Number(order.fee || 0), 0),
     },
     cash: {
-      totalCollected: orders
+      riderCollected: orders
         .filter((order) => order.paymentStatus === "paid")
         .reduce((total, order) => total + Number(order.fee || 0), 0),
-      confirmedAmount: 0,
-      pendingAmount: 0,
+      records: orders.filter((order) => order.paymentStatus === "paid").length,
       cashHeld: riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0),
     },
   };

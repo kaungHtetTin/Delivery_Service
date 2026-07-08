@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\DeliveryOrder;
 use App\Models\Payment;
 use App\Models\Rider;
+use App\Models\RiderSettlement;
 use App\Models\CashCollection;
 use App\Models\AdminLog;
 use App\Models\ClientAddress;
@@ -563,7 +564,6 @@ class DeliveryOrderApiTest extends TestCase
             'product_cash_collected' => 0,
             'delivery_fee_collected' => 3000,
             'total_cash_collected' => 3000,
-            'confirmed_at' => now(),
         ]);
         $pendingRider = $this->createRider([
             'code' => 'R-REPORT-PENDING',
@@ -615,11 +615,8 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonPath('payments.paid', 1)
             ->assertJsonPath('payments.rejected', 1)
             ->assertJsonPath('payments.approved_amount', 3000)
-            ->assertJsonPath('cash_collections.total_collected', 5000)
-            ->assertJsonPath('cash_collections.confirmed_amount', 3000)
-            ->assertJsonPath('cash_collections.pending_amount', 2000)
-            ->assertJsonPath('cash_collections.confirmed', 1)
-            ->assertJsonPath('cash_collections.pending', 1)
+            ->assertJsonPath('delivery_fees.rider_collected', 5000)
+            ->assertJsonPath('delivery_fees.records', 2)
             ->assertJsonCount(2, 'riders');
     }
 
@@ -701,17 +698,9 @@ class DeliveryOrderApiTest extends TestCase
             'cash_held' => 0,
         ]);
 
-        $this->postJson('/api/cash-collections', [
-            'delivery_order_id' => $order->id,
-            'rider_id' => $rider->id,
-            'delivery_fee_collected' => 3000,
-        ])
-            ->assertCreated()
-            ->assertJsonPath('total_cash_collected', '3000.00');
-
         $this->assertDatabaseHas('riders', [
             'id' => $rider->id,
-            'cash_held' => 3000,
+            'cash_held' => 0,
         ]);
 
         $this->patchJson("/api/delivery-orders/{$order->id}", [
@@ -731,24 +720,40 @@ class DeliveryOrderApiTest extends TestCase
             'code' => 'R-CRUD',
             'name' => 'CRUD Rider',
             'phone' => '09 700 100 200',
+            'email' => 'crud-rider@example.test',
+            'password' => 'secret-pass',
             'status' => 'available',
             'vehicle_type' => 'motorbike',
             'current_area' => 'Yankin',
         ])
             ->assertCreated()
             ->assertJsonPath('code', 'R-CRUD')
-            ->assertJsonPath('current_area', 'Yankin');
+            ->assertJsonPath('current_area', 'Yankin')
+            ->assertJsonPath('user.email', 'crud-rider@example.test');
 
         $riderId = $response->json('id');
+        $riderUser = User::findOrFail($response->json('user_id'));
+
+        $this->assertSame(User::ROLE_RIDER, $riderUser->role);
+        $this->assertTrue(Hash::check('secret-pass', $riderUser->password));
 
         $this->patchJson("/api/riders/{$riderId}", [
+            'phone' => '09 700 100 201',
+            'email' => 'crud-rider-updated@example.test',
+            'password' => 'new-secret-pass',
             'status' => 'on_break',
             'current_area' => 'Bahan',
-            'cash_held' => 5000,
         ])
             ->assertOk()
+            ->assertJsonPath('phone', '09 700 100 201')
+            ->assertJsonPath('user.email', 'crud-rider-updated@example.test')
             ->assertJsonPath('status', 'on_break')
             ->assertJsonPath('current_area', 'Bahan');
+
+        $riderUser->refresh();
+        $this->assertSame('crud-rider-updated@example.test', $riderUser->email);
+        $this->assertSame('09 700 100 201', $riderUser->phone);
+        $this->assertTrue(Hash::check('new-secret-pass', $riderUser->password));
 
         $this->deleteJson("/api/riders/{$riderId}")
             ->assertOk()
@@ -812,97 +817,81 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
-    public function test_office_can_create_update_transfer_and_delete_cash_collection()
+    public function test_office_cannot_manage_cash_collections_directly()
     {
         $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
 
         $order = DeliveryOrder::create($this->validOrderPayload());
         $rider = $this->createRider();
-        $nextRider = $this->createRider([
-            'code' => 'R-CASH-2',
-            'phone' => '09 700 100 201',
-        ]);
 
-        $response = $this->postJson('/api/cash-collections', [
+        $this->postJson('/api/cash-collections', [
             'delivery_order_id' => $order->id,
             'rider_id' => $rider->id,
             'delivery_fee_collected' => 3000,
             'payment_note' => 'Collected from receiver.',
-        ])
-            ->assertCreated()
-            ->assertJsonPath('total_cash_collected', '3000.00')
-            ->assertJsonPath('product_cash_collected', '0.00');
+        ])->assertNotFound();
 
-        $collectionId = $response->json('id');
-
-        $this->assertDatabaseHas('riders', [
-            'id' => $rider->id,
-            'cash_held' => 3000,
-        ]);
-
-        $this->getJson('/api/cash-collections?confirmed=false')
-            ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $collectionId);
-
-        $this->getJson('/api/cash-collections?confirmed=true')
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
-
-        $this->patchJson("/api/cash-collections/{$collectionId}", [
-            'delivery_fee_collected' => 3000,
-            'confirmed_at' => now()->toISOString(),
-        ])
-            ->assertOk()
-            ->assertJsonPath('total_cash_collected', '3000.00');
-
-        $this->getJson('/api/cash-collections?confirmed=true')
-            ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $collectionId);
-
-        $this->getJson('/api/cash-collections?confirmed=false')
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
-
-        $this->assertDatabaseHas('riders', [
-            'id' => $rider->id,
-            'cash_held' => 3000,
-        ]);
-
-        $this->patchJson("/api/cash-collections/{$collectionId}", [
-            'delivery_fee_collected' => 3500,
-        ])
-            ->assertOk()
-            ->assertJsonPath('total_cash_collected', '3500.00');
-
-        $this->assertDatabaseHas('riders', [
-            'id' => $rider->id,
-            'cash_held' => 3500,
-        ]);
-
-        $this->patchJson("/api/cash-collections/{$collectionId}", [
-            'rider_id' => $nextRider->id,
-        ])->assertOk();
-
+        $this->getJson('/api/cash-collections')->assertNotFound();
         $this->assertDatabaseHas('riders', [
             'id' => $rider->id,
             'cash_held' => 0,
         ]);
-        $this->assertDatabaseHas('riders', [
-            'id' => $nextRider->id,
-            'cash_held' => 3500,
+    }
+
+    public function test_office_can_collect_rider_held_delivery_fees()
+    {
+        $office = $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+        $rider = $this->createRider([
+            'cash_held' => 4500,
         ]);
 
-        $this->deleteJson("/api/cash-collections/{$collectionId}")
+        $this->postJson("/api/riders/{$rider->id}/settlements", [
+            'amount' => 3000,
+            'note' => 'Morning rider remittance.',
+        ])
             ->assertOk()
-            ->assertJsonPath('message', 'Cash collection deleted.');
+            ->assertJsonPath('rider.cash_held', '1500.00')
+            ->assertJsonPath('settlement.amount', '3000.00')
+            ->assertJsonPath('settlement.cash_held_before', '4500.00')
+            ->assertJsonPath('settlement.cash_held_after', '1500.00')
+            ->assertJsonPath('settlement.collected_by', $office->id);
 
-        $this->assertDatabaseMissing('cash_collections', ['id' => $collectionId]);
         $this->assertDatabaseHas('riders', [
-            'id' => $nextRider->id,
-            'cash_held' => 0,
+            'id' => $rider->id,
+            'cash_held' => 1500,
         ]);
+        $this->assertDatabaseHas('rider_settlements', [
+            'rider_id' => $rider->id,
+            'collected_by' => $office->id,
+            'amount' => 3000,
+            'cash_held_before' => 4500,
+            'cash_held_after' => 1500,
+        ]);
+        $this->assertDatabaseHas('admin_logs', [
+            'action' => 'rider_delivery_fees_collected',
+            'subject_type' => Rider::class,
+            'subject_id' => $rider->id,
+        ]);
+    }
+
+    public function test_office_cannot_collect_more_than_rider_cash_held()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+        $rider = $this->createRider([
+            'cash_held' => 2000,
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/settlements", [
+            'amount' => 2500,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
+
+        $this->assertDatabaseHas('riders', [
+            'id' => $rider->id,
+            'cash_held' => 2000,
+        ]);
+        $this->assertSame(0, RiderSettlement::count());
     }
 
     public function test_office_can_manage_users_customers_and_shops()
@@ -1290,6 +1279,65 @@ class DeliveryOrderApiTest extends TestCase
             'id' => $officeResponse->json('id'),
             'is_default' => true,
         ]);
+    }
+
+    public function test_authenticated_user_can_update_own_profile_and_password()
+    {
+        Storage::fake('public');
+
+        $office = $this->createUser([
+            'name' => 'Office Profile',
+            'email' => 'office-profile@example.test',
+            'phone' => '09 555 900 100',
+            'role' => User::ROLE_OFFICE_ADMIN,
+            'password' => Hash::make('old-secret-pass'),
+        ]);
+
+        Sanctum::actingAs($office);
+
+        $this->patchJson('/api/user', [
+            'name' => 'Updated Office Profile',
+            'email' => 'updated-office-profile@example.test',
+            'phone' => '09 555 900 101',
+            'current_password' => 'wrong-secret-pass',
+            'password' => 'new-secret-pass',
+            'password_confirmation' => 'new-secret-pass',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('current_password');
+
+        $this->patchJson('/api/user', [
+            'name' => 'Updated Office Profile',
+            'email' => 'updated-office-profile@example.test',
+            'phone' => '09 555 900 101',
+            'current_password' => 'old-secret-pass',
+            'password' => 'new-secret-pass',
+            'password_confirmation' => 'new-secret-pass',
+        ])
+            ->assertOk()
+            ->assertJsonPath('name', 'Updated Office Profile')
+            ->assertJsonPath('email', 'updated-office-profile@example.test')
+            ->assertJsonPath('phone', '09 555 900 101')
+            ->assertJsonPath('role', User::ROLE_OFFICE_ADMIN);
+
+        $office->refresh();
+        $this->assertTrue(Hash::check('new-secret-pass', $office->password));
+
+        $photoResponse = $this->post('/api/user/profile', [
+            'name' => 'Updated Office Profile',
+            'email' => 'updated-office-profile@example.test',
+            'phone' => '09 555 900 101',
+            'profile_photo' => $this->fakePngUpload(),
+        ], [
+            'Accept' => 'application/json',
+        ])
+            ->assertOk()
+            ->assertJsonPath('name', 'Updated Office Profile');
+
+        $office->refresh();
+        $this->assertNotNull($office->profile_photo_path);
+        Storage::disk('public')->assertExists($office->profile_photo_path);
+        $this->assertNotEmpty($photoResponse->json('profile_photo_url'));
     }
 
     public function test_client_can_save_one_default_business_pickup_shop()

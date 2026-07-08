@@ -25,7 +25,7 @@ class ReportController extends Controller
             ->when($dateFrom, fn ($query) => $query->whereDate('created_at', '>=', $dateFrom))
             ->when($dateTo, fn ($query) => $query->whereDate('created_at', '<=', $dateTo));
 
-        $cashCollections = CashCollection::query()
+        $riderCollectedFees = CashCollection::query()
             ->when($dateFrom, fn ($query) => $query->whereDate('created_at', '>=', $dateFrom))
             ->when($dateTo, fn ($query) => $query->whereDate('created_at', '<=', $dateTo));
 
@@ -45,12 +45,9 @@ class ReportController extends Controller
                 'refunded' => (clone $payments)->where('status', 'refunded')->count(),
                 'approved_amount' => (float) (clone $payments)->where('status', 'paid')->sum('amount'),
             ],
-            'cash_collections' => [
-                'total_collected' => (float) (clone $cashCollections)->sum('delivery_fee_collected'),
-                'confirmed_amount' => (float) (clone $cashCollections)->whereNotNull('confirmed_at')->sum('delivery_fee_collected'),
-                'pending_amount' => (float) (clone $cashCollections)->whereNull('confirmed_at')->sum('delivery_fee_collected'),
-                'confirmed' => (clone $cashCollections)->whereNotNull('confirmed_at')->count(),
-                'pending' => (clone $cashCollections)->whereNull('confirmed_at')->count(),
+            'delivery_fees' => [
+                'rider_collected' => (float) (clone $riderCollectedFees)->sum('delivery_fee_collected'),
+                'records' => (clone $riderCollectedFees)->count(),
             ],
             'riders' => Rider::query()
                 ->withCount([

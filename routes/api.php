@@ -4,7 +4,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AdminLogController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\CashCollectionController;
 use App\Http\Controllers\Api\ClientAddressController;
 use App\Http\Controllers\Api\ClientProfileController;
 use App\Http\Controllers\Api\ClientShopController;
@@ -18,6 +17,7 @@ use App\Http\Controllers\Api\ShopController;
 use App\Http\Controllers\Api\ShippingAddressController;
 use App\Http\Controllers\Api\SystemSettingController;
 use App\Http\Controllers\Api\UserManagementController;
+use App\Http\Controllers\Api\UserProfileController;
 
 /*
 |--------------------------------------------------------------------------
@@ -37,6 +37,8 @@ Route::get('settings/public', [SystemSettingController::class, 'publicIndex']);
 Route::middleware('auth:sanctum')->get('user', function (Request $request) {
     return $request->user();
 });
+Route::middleware('auth:sanctum')->patch('user', [UserProfileController::class, 'update']);
+Route::middleware('auth:sanctum')->post('user/profile', [UserProfileController::class, 'update']);
 Route::middleware('auth:sanctum')->post('auth/logout', [AuthController::class, 'logout']);
 Route::middleware('auth:sanctum')->get('notifications', [NotificationController::class, 'index']);
 Route::middleware('auth:sanctum')->patch('notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
@@ -77,7 +79,6 @@ Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(func
     Route::patch('payments/{payment}', [PaymentController::class, 'update']);
     Route::delete('payments/{payment}', [PaymentController::class, 'destroy']);
     Route::patch('payments/{payment}/review', [PaymentController::class, 'review']);
-    Route::apiResource('cash-collections', CashCollectionController::class);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('shops', ShopController::class);
     Route::get('shipping-addresses', [ShippingAddressController::class, 'index']);
@@ -86,6 +87,7 @@ Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(func
     Route::get('reports/summary', [ReportController::class, 'summary']);
     Route::get('admin-logs', [AdminLogController::class, 'index']);
     Route::post('riders', [RiderController::class, 'store']);
+    Route::post('riders/{rider}/settlements', [RiderController::class, 'collectHeldFees']);
     Route::patch('riders/{rider}', [RiderController::class, 'update']);
     Route::delete('riders/{rider}', [RiderController::class, 'destroy']);
 });

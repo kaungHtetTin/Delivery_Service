@@ -54,6 +54,28 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+async function requestAllPages(path, mapper, { params = {}, perPage = 100 } = {}) {
+  const records = [];
+  let page = 1;
+  let lastPage = 1;
+
+  do {
+    const query = new URLSearchParams({
+      ...params,
+      page: String(page),
+      per_page: String(perPage),
+    });
+    const separator = path.includes("?") ? "&" : "?";
+    const response = await request(`${path}${separator}${query.toString()}`);
+
+    records.push(...(response.data || []).map(mapper));
+    lastPage = Number(response.last_page || 1);
+    page += 1;
+  } while (page <= lastPage);
+
+  return records;
+}
+
 const humanize = (value) =>
   value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
@@ -71,6 +93,20 @@ const initials = (name) =>
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+const dateInputValue = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
 
 export async function login(credentials) {
   return request("/auth/token", {
@@ -103,6 +139,44 @@ export async function updateClientProfile(profile) {
       name: profile.name,
       email: profile.email,
       phone: profile.phone,
+    }),
+  });
+}
+
+export async function updateCurrentUserProfile(profile) {
+  if (profile.photoFile) {
+    const body = new FormData();
+    body.append("name", profile.name);
+    body.append("email", profile.email);
+    body.append("phone", profile.phone);
+    body.append("profile_photo", profile.photoFile);
+
+    if (profile.currentPassword) {
+      body.append("current_password", profile.currentPassword);
+    }
+
+    if (profile.password) {
+      body.append("password", profile.password);
+      body.append("password_confirmation", profile.passwordConfirmation || "");
+    }
+
+    return request("/user/profile", {
+      method: "POST",
+      body,
+    });
+  }
+
+  return request("/user", {
+    method: "PATCH",
+    body: JSON.stringify({
+      name: profile.name,
+      email: profile.email,
+      phone: profile.phone,
+      ...(profile.currentPassword ? { current_password: profile.currentPassword } : {}),
+      ...(profile.password ? {
+        password: profile.password,
+        password_confirmation: profile.passwordConfirmation,
+      } : {}),
     }),
   });
 }
@@ -207,6 +281,7 @@ export function mapOrder(order) {
   return {
     _apiId: order.id,
     id: order.code,
+    createdDate: order.created_at ? dateInputValue(order.created_at) : "",
     createdAt: order.created_at ? new Date(order.created_at).toLocaleString() : "Just now",
     updatedAt: order.updated_at ? new Date(order.updated_at).toLocaleString() : "Just now",
     client: order.client_name || "",
@@ -258,6 +333,7 @@ export function mapUser(user) {
     name: user.name,
     email: user.email,
     phone: user.phone,
+    profilePhotoUrl: user.profile_photo_url || "",
     role: user.role,
     createdAt: user.created_at ? new Date(user.created_at).toLocaleString() : "Just now",
   };
@@ -396,7 +472,8 @@ export function mapRider(rider) {
     id: rider.code,
     name: rider.name,
     initials: initials(rider.name),
-    phone: rider.phone,
+    phone: rider.phone || rider.user?.phone || "",
+    email: rider.email || rider.user?.email || "",
     status: rider.status,
     activeOrders: rider.active_orders_count || 0,
     area: rider.current_area || "Area unavailable",
@@ -408,27 +485,8 @@ export function mapRider(rider) {
   };
 }
 
-export function mapCashCollection(collection) {
-  return {
-    _apiId: collection.id,
-    id: `COL-${collection.id}`,
-    orderApiId: collection.delivery_order_id,
-    orderCode: collection.delivery_order?.code || "",
-    riderApiId: collection.rider_id,
-    riderId: collection.rider?.code || "",
-    riderName: collection.rider?.name || "",
-    deliveryFeeCollected: Number(collection.delivery_fee_collected),
-    totalCashCollected: Number(collection.total_cash_collected),
-    paymentNote: collection.payment_note || "",
-    confirmed: Boolean(collection.confirmed_at),
-    confirmedAt: collection.confirmed_at ? new Date(collection.confirmed_at).toLocaleString() : "",
-    createdAt: collection.created_at ? new Date(collection.created_at).toLocaleString() : "Just now",
-  };
-}
-
 export async function fetchOrders() {
-  const response = await request("/delivery-orders?per_page=100");
-  return response.data.map(mapOrder);
+  return requestAllPages("/delivery-orders", mapOrder);
 }
 
 export async function updateDeliveryOrder(order) {
@@ -452,8 +510,7 @@ export async function fetchRiders() {
 }
 
 export async function fetchUsers() {
-  const response = await request("/users?per_page=100");
-  return response.data.map(mapUser);
+  return requestAllPages("/users", mapUser);
 }
 
 export async function createUser(user) {
@@ -634,33 +691,19 @@ export async function deleteRider(rider) {
   });
 }
 
-export async function fetchCashCollections() {
-  const response = await request("/cash-collections?per_page=100");
-  return response.data.map(mapCashCollection);
-}
-
-export async function createCashCollection(collection) {
-  const response = await request("/cash-collections", {
+export async function collectRiderHeldFees(rider, payload) {
+  const response = await request(`/riders/${rider._apiId}/settlements`, {
     method: "POST",
-    body: JSON.stringify(cashCollectionPayload(collection)),
+    body: JSON.stringify({
+      amount: Number(payload.amount || 0),
+      note: payload.note || null,
+    }),
   });
 
-  return mapCashCollection(response);
-}
-
-export async function updateCashCollection(collection) {
-  const response = await request(`/cash-collections/${collection._apiId}`, {
-    method: "PATCH",
-    body: JSON.stringify(cashCollectionPayload(collection)),
-  });
-
-  return mapCashCollection(response);
-}
-
-export async function deleteCashCollection(collection) {
-  return request(`/cash-collections/${collection._apiId}`, {
-    method: "DELETE",
-  });
+  return {
+    rider: mapRider(response.rider),
+    settlement: response.settlement,
+  };
 }
 
 export async function createDeliveryOrder(order) {
@@ -865,20 +908,10 @@ function riderPayload(rider) {
     name: rider.name,
     phone: rider.phone,
     email: rider.email || null,
+    ...(rider.password ? { password: rider.password } : {}),
     status: rider.status,
     vehicle_type: rider.vehicle?.toLowerCase().replaceAll(" ", "_") || "motorbike",
     current_area: rider.area,
-    cash_held: Number(rider.cashHeld || 0),
-  };
-}
-
-function cashCollectionPayload(collection) {
-  return {
-    delivery_order_id: collection.orderApiId,
-    rider_id: collection.riderApiId,
-    delivery_fee_collected: Number(collection.deliveryFeeCollected || 0),
-    payment_note: collection.paymentNote || null,
-    confirmed_at: collection.confirmed ? new Date().toISOString() : null,
   };
 }
 

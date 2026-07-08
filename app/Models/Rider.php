@@ -49,4 +49,9 @@ class Rider extends Model
     {
         return $this->hasMany(CashCollection::class);
     }
+
+    public function settlements(): HasMany
+    {
+        return $this->hasMany(RiderSettlement::class);
+    }
 }

@@ -5,21 +5,29 @@ import { activeStatuses, formatDeliveryFeeLabel, money, useStoredState } from ".
 import { AddressBlock, CreatorSourceBadge, formatOrderCreator, Logo, StatusBadge, ThemeControl } from "../components/shared";
 import { AdminReports } from "./admin/AdminReports";
 
+function todayDateInputValue() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 export function AdminPortal({
   appName = "FlowDrop Delivery",
   orders,
   riders,
   assignRider,
-  cashCollections = [],
+  collectRiderFees,
   customers = [],
-  removeCashCollection,
   removeOrder,
   removeRider,
   removeSetting,
   removeUser,
   reportData,
-  saveCashCollection,
   saveOrder,
+  saveProfile,
   saveRider,
   saveSetting,
   saveUser,
@@ -28,26 +36,34 @@ export function AdminPortal({
   settings = [],
   shops = [],
   themeProps,
+  onLogout,
+  user,
   users = [],
 }) {
+  const today = useMemo(() => todayDateInputValue(), []);
   const [page, setPage] = useStoredState("flowdrop.admin.page", "dashboard");
   const [assignmentOrder, setAssignmentOrder] = useState(null);
   const [orderEditor, setOrderEditor] = useState(null);
   const [riderEditor, setRiderEditor] = useState(null);
-  const [cashEditor, setCashEditor] = useState(null);
+  const [settlementRider, setSettlementRider] = useState(null);
   const [userEditor, setUserEditor] = useState(null);
   const [settingEditor, setSettingEditor] = useState(null);
   const [orderFilters, setOrderFilters] = useState({
     search: "",
     status: "all",
-    paymentStatus: "all",
     riderId: "all",
+    dateFrom: today,
+    dateTo: today,
   });
   const [riderFilters, setRiderFilters] = useState({
     search: "",
     status: "all",
   });
-  const activePage = page === "payments" ? "cash" : page;
+  const [collectionFilters, setCollectionFilters] = useState({
+    search: "",
+    holding: "positive",
+  });
+  const activePage = ["cash", "payments"].includes(page) ? "collections" : page;
   const selectedOrder = orders.find((order) => order.id === selectedOrderId);
   const filteredOrders = useMemo(
     () => orders.filter((order) => {
@@ -56,8 +72,9 @@ export function AdminPortal({
       return (
         (!orderFilters.search || searchText.includes(orderFilters.search.toLowerCase())) &&
         (orderFilters.status === "all" || order.status === orderFilters.status) &&
-        (orderFilters.paymentStatus === "all" || order.paymentStatus === orderFilters.paymentStatus) &&
-        (orderFilters.riderId === "all" || order.riderId === orderFilters.riderId)
+        (orderFilters.riderId === "all" || order.riderId === orderFilters.riderId) &&
+        (!orderFilters.dateFrom || order.createdDate >= orderFilters.dateFrom) &&
+        (!orderFilters.dateTo || order.createdDate <= orderFilters.dateTo)
       );
     }),
     [orderFilters, orders],
@@ -73,39 +90,89 @@ export function AdminPortal({
     }),
     [riderFilters, riders],
   );
+  const collectionRiders = useMemo(
+    () => riders
+      .filter((rider) => {
+        const searchText = `${rider.id} ${rider.name} ${rider.phone} ${rider.area}`.toLowerCase();
+
+        return (
+          (!collectionFilters.search || searchText.includes(collectionFilters.search.toLowerCase())) &&
+          (collectionFilters.holding === "all" || Number(rider.cashHeld || 0) > 0)
+        );
+      })
+      .sort((a, b) => Number(b.cashHeld || 0) - Number(a.cashHeld || 0)),
+    [collectionFilters, riders],
+  );
+  const ordersPagination = usePagination(
+    filteredOrders,
+    `orders:${orderFilters.search}|${orderFilters.status}|${orderFilters.riderId}|${orderFilters.dateFrom}|${orderFilters.dateTo}`,
+  );
+  const ridersPagination = usePagination(
+    filteredRiders,
+    `riders:${riderFilters.search}|${riderFilters.status}`,
+  );
+  const collectionsPagination = usePagination(
+    collectionRiders,
+    `collections:${collectionFilters.search}|${collectionFilters.holding}`,
+  );
+  const usersPagination = usePagination(users, "users");
   const totalCashHeld = riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0);
-  const totalCollectedFees = cashCollections.reduce((total, collection) => total + Number(collection.totalCashCollected || 0), 0);
   const currentOperationOrders = orders.filter((order) => !["completed", "failed", "cancelled"].includes(order.status));
   const stats = [
     ["New requests", orders.filter((order) => order.status === "pending").length, "box", "Waiting for review"],
     ["Active deliveries", orders.filter((order) => activeStatuses.has(order.status)).length, "navigation", "Live operations"],
     ["Available riders", riders.filter((rider) => rider.status === "available").length, "bike", `${riders.length} total riders`],
     ["Cash held", money(totalCashHeld), "wallet", "Delivery fees with riders"],
-    ["Collected fees", money(totalCollectedFees), "chart", "Recorded collections"],
   ];
-  const nav = [
-    ["dashboard", "grid", "Dashboard"],
-    ["orders", "box", "Orders"],
-    ["riders", "bike", "Riders"],
-    ["cash", "wallet", "Cash collections"],
-    ["users", "lock", "Users"],
-    ["tracking", "mapPin", "Tracking map"],
-    ["reports", "chart", "Reports"],
-    ["settings", "settings", "Settings"],
+  const navGroups = [
+    {
+      label: "Operations",
+      items: [
+        ["dashboard", "grid", "Dashboard"],
+        ["orders", "box", "Orders"],
+        ["collections", "wallet", "Fee collections"],
+        ["tracking", "mapPin", "Tracking map"],
+      ],
+    },
+    {
+      label: "Master data",
+      items: [
+        ["riders", "bike", "Riders"],
+        ["users", "lock", "Users"],
+      ],
+    },
+    {
+      label: "Insights",
+      items: [
+        ["reports", "chart", "Reports"],
+        ["settings", "settings", "Settings"],
+      ],
+    },
+    {
+      label: "Account",
+      items: [
+        ["profile", "user", "Profile"],
+      ],
+    },
   ];
+  const pageLabel = navGroups.flatMap((group) => group.items).find(([value]) => value === activePage)?.[2];
 
   return (
     <div className="admin-app">
       <aside className="admin-sidebar glass">
         <Logo appName={appName} />
         <nav>
-          {nav.map(([value, icon, label]) => (
-            <button className={activePage === value ? "active" : ""} key={value} onClick={() => setPage(value)} type="button">
-              <Icon name={icon} size={17} /> {label}
-            </button>
+          {navGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <p>{group.label}</p>
+              {group.items.map(([value, icon, label]) => (
+                <button className={activePage === value ? "active" : ""} key={value} onClick={() => setPage(value)} type="button">
+                  <Icon name={icon} size={17} /> {label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
-        <div className="admin-profile"><span>MA</span><div><strong>May Aye</strong><small>Office admin</small></div></div>
       </aside>
       <main className="admin-main">
         <header className="admin-topbar glass">
@@ -121,14 +188,15 @@ export function AdminPortal({
             />
           </div>
           <div className="topbar-actions">
+            <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
             <ThemeControl {...themeProps} />
             <button className="icon-btn notification-btn" type="button"><Icon name="bell" /><span /></button>
+            <AdminProfileMenu onLogout={onLogout} onProfile={() => setPage("profile")} onSettings={() => setPage("settings")} onUsers={() => setPage("users")} user={user} />
           </div>
         </header>
         <div className="admin-content">
           <div className="admin-page-heading">
-            <div><p className="eyebrow">TUESDAY, 02 JUNE</p><h1>{activePage === "dashboard" || activePage === "customers" ? "Operations overview" : nav.find(([value]) => value === activePage)?.[2]}</h1></div>
-            <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
+            <div><p className="eyebrow">TUESDAY, 02 JUNE</p><h1>{activePage === "dashboard" || activePage === "customers" ? "Operations overview" : pageLabel}</h1></div>
           </div>
           {(activePage === "dashboard" || activePage === "customers") && (
             <>
@@ -172,27 +240,26 @@ export function AdminPortal({
               </div>
               <div className="panel glass">
                 <PanelHeading title="All delivery orders" eyebrow="ORDER MANAGEMENT" action="Export" onAction={() => exportOrdersCsv(filteredOrders)} />
-                <OrderFilters filters={orderFilters} onChange={setOrderFilters} riders={riders} />
-                <OrderTable onDelete={removeOrder} onEdit={(order) => setOrderEditor(order)} orders={filteredOrders} riders={riders} selectOrder={setSelectedOrderId} />
+                <OrderFilters filters={orderFilters} onChange={setOrderFilters} riders={riders} today={today} />
+                <OrderTable onDelete={removeOrder} onEdit={(order) => setOrderEditor(order)} orders={ordersPagination.items} riders={riders} selectOrder={setSelectedOrderId} />
+                <TablePagination label="orders" pagination={ordersPagination} />
               </div>
             </section>
           )}
-          {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} riders={filteredRiders} />}
-          {activePage === "cash" && <CashCollectionsAdmin collections={cashCollections} onConfirm={(collection) => saveCashCollection({ ...collection, confirmed: true })} onDelete={removeCashCollection} onEdit={(collection) => setCashEditor(collection)} onNew={() => setCashEditor({})} orders={orders} riders={riders} />}
-          {activePage === "users" && <UsersAdmin onDelete={removeUser} onEdit={(user) => setUserEditor(user)} onNew={() => setUserEditor({})} users={users} />}
+          {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} pagination={ridersPagination} riders={ridersPagination.items} />}
+          {activePage === "collections" && <RiderCollectionsAdmin filters={collectionFilters} onCollect={setSettlementRider} onFilterChange={setCollectionFilters} pagination={collectionsPagination} riders={collectionsPagination.items} totalCashHeld={totalCashHeld} />}
+          {activePage === "users" && <UsersAdmin onDelete={removeUser} onEdit={(user) => setUserEditor(user)} onNew={() => setUserEditor({})} pagination={usersPagination} users={usersPagination.items} />}
           {activePage === "settings" && <SettingsAdmin onDelete={removeSetting} onEdit={(setting) => setSettingEditor(setting)} onNew={() => setSettingEditor({})} settings={settings} />}
           {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap riders={riders} large /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
-          {!["dashboard", "orders", "riders", "cash", "customers", "users", "settings", "tracking", "reports"].includes(activePage) && <AdminPlaceholder page={activePage} />}
+          {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
+          {!["dashboard", "orders", "riders", "collections", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
         </div>
       </main>
       {selectedOrder && (
         <OrderDrawer
-          cashCollections={cashCollections}
           close={() => setSelectedOrderId(null)}
           onAssign={() => setAssignmentOrder(selectedOrder)}
-          onCashCollectionSave={saveCashCollection}
-          onOrderSave={saveOrder}
           onDelete={() => {
             removeOrder(selectedOrder.id);
             setSelectedOrderId(null);
@@ -227,13 +294,11 @@ export function AdminPortal({
           rider={riderEditor}
         />
       )}
-      {cashEditor && (
-        <CashCollectionEditorModal
-          close={() => setCashEditor(null)}
-          collection={cashEditor}
-          onSave={(collection) => saveCashCollection(collection).then(() => setCashEditor(null))}
-          orders={orders}
-          riders={riders}
+      {settlementRider && (
+        <RiderSettlementModal
+          close={() => setSettlementRider(null)}
+          onSave={(settlement) => collectRiderFees(settlementRider, settlement).then(() => setSettlementRider(null))}
+          rider={settlementRider}
         />
       )}
       {userEditor && <UserEditorModal close={() => setUserEditor(null)} onSave={(user) => saveUser(user).then(() => setUserEditor(null))} user={userEditor} />}
@@ -253,6 +318,51 @@ function PanelHeading({ eyebrow, title, action, onAction }) {
     <div className="panel-heading">
       <div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div>
       {action && <button className="text-btn" onClick={onAction} type="button">{action}</button>}
+    </div>
+  );
+}
+
+function userInitials(user) {
+  return (user?.name || user?.email || "Office")
+    .split(/[ @.]+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function ProfileAvatar({ className = "", previewUrl = "", user }) {
+  const photoUrl = previewUrl || user?.profile_photo_url;
+
+  return photoUrl
+    ? <img alt="" className={`profile-avatar ${className}`} src={photoUrl} />
+    : <span className={`profile-avatar ${className}`}>{userInitials(user)}</span>;
+}
+
+function AdminProfileMenu({ onLogout, onProfile, onSettings, onUsers, user }) {
+  const [open, setOpen] = useState(false);
+  const displayName = user?.name || "Office user";
+  const role = user?.role?.replaceAll("_", " ") || "office admin";
+
+  return (
+    <div className="profile-menu">
+      <button className="profile-trigger" onClick={() => setOpen((current) => !current)} type="button">
+        <ProfileAvatar user={user} />
+        <div><strong>{displayName}</strong><small>{role}</small></div>
+      </button>
+      {open && (
+        <div className="profile-dropdown glass">
+          <div className="profile-dropdown-head">
+            <ProfileAvatar user={user} />
+            <div><strong>{displayName}</strong><small>{user?.email || "No email"}</small></div>
+          </div>
+          <button onClick={() => { onProfile?.(); setOpen(false); }} type="button"><Icon name="user" size={15} /> Profile</button>
+          <button onClick={() => { onUsers?.(); setOpen(false); }} type="button"><Icon name="lock" size={15} /> User accounts</button>
+          <button onClick={() => { onSettings?.(); setOpen(false); }} type="button"><Icon name="settings" size={15} /> Settings</button>
+          <button className="danger" onClick={onLogout} type="button"><Icon name="close" size={15} /> Sign out</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -289,26 +399,99 @@ function exportOrdersCsv(orders) {
   URL.revokeObjectURL(url);
 }
 
-function OrderFilters({ filters, onChange, riders }) {
+function usePagination(items, resetKey, initialPageSize = 10) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [resetKey, pageSize]);
+
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  useEffect(() => {
+    if (page !== currentPage) {
+      setPage(currentPage);
+    }
+  }, [currentPage, page]);
+
+  const start = (currentPage - 1) * pageSize;
+
+  return {
+    from: total === 0 ? 0 : start + 1,
+    items: items.slice(start, start + pageSize),
+    page: currentPage,
+    pageSize,
+    setPage,
+    setPageSize: (value) => setPageSize(Number(value)),
+    to: Math.min(start + pageSize, total),
+    total,
+    totalPages,
+  };
+}
+
+function TablePagination({ label, pagination }) {
+  const pageNumbers = Array.from({ length: pagination.totalPages }, (_, index) => index + 1)
+    .filter((page) => (
+      page === 1 ||
+      page === pagination.totalPages ||
+      Math.abs(page - pagination.page) <= 1
+    ));
+
+  return (
+    <div className="table-pagination">
+      <span>{pagination.from}-{pagination.to} of {pagination.total} {label}</span>
+      <div>
+        <select aria-label={`Rows per page for ${label}`} onChange={(event) => pagination.setPageSize(event.target.value)} value={pagination.pageSize}>
+          {[10, 25, 50].map((size) => <option key={size} value={size}>{size} / page</option>)}
+        </select>
+        <button disabled={pagination.page <= 1} onClick={() => pagination.setPage(pagination.page - 1)} type="button"><Icon name="chevronLeft" size={15} /></button>
+        {pageNumbers.map((page, index) => {
+          const previous = pageNumbers[index - 1];
+
+          return (
+            <span className="page-number-wrap" key={page}>
+              {previous && page - previous > 1 && <i>...</i>}
+              <button className={page === pagination.page ? "active" : ""} onClick={() => pagination.setPage(page)} type="button">{page}</button>
+            </span>
+          );
+        })}
+        <button disabled={pagination.page >= pagination.totalPages} onClick={() => pagination.setPage(pagination.page + 1)} type="button"><Icon name="chevronRight" size={15} /></button>
+      </div>
+    </div>
+  );
+}
+
+function OrderFilters({ filters, onChange, riders, today }) {
+  const [expanded, setExpanded] = useState(false);
   const statuses = ["pending", "rider_assigned", "rider_accepted", "picked_up", "delivered", "completed", "failed", "cancelled"];
-  const paymentStatuses = ["unpaid", "pending_approval", "paid", "rejected", "refunded"];
   const update = (key, value) => onChange({ ...filters, [key]: value });
 
   return (
-    <div className="filter-toolbar">
-      <div className="search-box"><Icon name="search" size={16} /><input onChange={(event) => update("search", event.target.value)} placeholder="Search order, creator, phone, receiver..." value={filters.search} /></div>
-      <select onChange={(event) => update("status", event.target.value)} value={filters.status}>
-        <option value="all">All statuses</option>
-        {statuses.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}
-      </select>
-      <select onChange={(event) => update("paymentStatus", event.target.value)} value={filters.paymentStatus}>
-        <option value="all">All fee status</option>
-        {paymentStatuses.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}
-      </select>
-      <select onChange={(event) => update("riderId", event.target.value)} value={filters.riderId}>
-        <option value="all">All riders</option>
-        {riders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name}</option>)}
-      </select>
+    <div className="order-filter-box">
+      <div className="order-filter-main">
+        <div className="search-box"><Icon name="search" size={16} /><input onChange={(event) => update("search", event.target.value)} onFocus={() => setExpanded(false)} placeholder="Search order, creator, phone, receiver..." value={filters.search} /></div>
+        <button className={`btn secondary ${expanded ? "active" : ""}`} onClick={() => setExpanded((current) => !current)} type="button">
+          <Icon name="filter" size={15} /> Filters
+        </button>
+      </div>
+      {expanded && (
+        <div className="filter-toolbar order-filters">
+          <select onChange={(event) => update("status", event.target.value)} value={filters.status}>
+            <option value="all">All statuses</option>
+            {statuses.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}
+          </select>
+          <select onChange={(event) => update("riderId", event.target.value)} value={filters.riderId}>
+            <option value="all">All riders</option>
+            {riders.map((rider) => <option key={rider.id} value={rider.id}>{rider.name}</option>)}
+          </select>
+          <input aria-label="Order date from" onChange={(event) => update("dateFrom", event.target.value)} type="date" value={filters.dateFrom} />
+          <input aria-label="Order date to" onChange={(event) => update("dateTo", event.target.value)} type="date" value={filters.dateTo} />
+          <button className="btn secondary" onClick={() => onChange({ ...filters, dateFrom: today, dateTo: today })} type="button">Today</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -427,7 +610,7 @@ function RiderSummary({ riders }) {
   return <div className="rider-summary">{riders.slice(0, 4).map((rider) => <div key={rider.id}><span className="avatar">{rider.initials}</span><p><strong>{rider.name}</strong><small>{rider.area} - {rider.lastSeen}</small></p><StatusBadge status={rider.status} /></div>)}</div>;
 }
 
-function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, riders }) {
+function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, pagination, riders }) {
   const update = (key, value) => onFilterChange({ ...filters, [key]: value });
 
   return (
@@ -443,7 +626,7 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, riders 
           {["available", "busy", "online", "offline", "on_break"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}
         </select>
       </div>
-      <div className="table-wrap"><table><thead><tr><th>Rider</th><th>Status</th><th>Active orders</th><th>Current area</th><th>Last GPS update</th><th>Delivery fees held</th><th /></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr><th>Rider</th><th>Status</th><th>Active orders</th><th>Current area</th><th>Last GPS update</th><th /></tr></thead><tbody>
         {riders.map((rider) => (
           <tr key={rider.id}>
             <td><span className="rider-cell"><i>{rider.initials}</i><span><strong>{rider.name}</strong><small>{rider.phone}</small></span></span></td>
@@ -451,7 +634,6 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, riders 
             <td>{rider.activeOrders}</td>
             <td>{rider.area}</td>
             <td>{rider.lastSeen}</td>
-            <td><strong>{money(rider.cashHeld)}</strong></td>
             <td>
               <div className="inline-actions">
                 <button className="icon-btn small" onClick={() => onEdit(rider)} title="Edit rider" type="button"><Icon name="settings" size={15} /></button>
@@ -468,93 +650,54 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, riders 
           </tr>
         ))}
       </tbody></table></div>
+      <TablePagination label="riders" pagination={pagination} />
     </section>
   );
 }
 
-function CashCollectionsAdmin({ collections, onConfirm, onDelete, onEdit, onNew, orders, riders }) {
-  const [filters, setFilters] = useState({ status: "all", riderId: "all" });
-  const filteredCollections = collections.filter((collection) => (
-    (filters.status === "all" ||
-      (filters.status === "confirmed" && collection.confirmedAt) ||
-      (filters.status === "pending" && !collection.confirmedAt)) &&
-    (filters.riderId === "all" || String(collection.riderApiId) === String(filters.riderId))
-  ));
-  const totalCollected = filteredCollections.reduce((total, collection) => total + Number(collection.totalCashCollected || 0), 0);
-  const pendingCount = collections.filter((collection) => !collection.confirmedAt).length;
-  const confirmedCount = collections.filter((collection) => collection.confirmedAt).length;
-  const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+function RiderCollectionsAdmin({ filters, onCollect, onFilterChange, pagination, riders, totalCashHeld }) {
+  const update = (key, value) => onFilterChange({ ...filters, [key]: value });
 
   return (
     <section className="panel glass">
       <div className="panel-heading">
-        <div><p className="eyebrow">CASH COLLECTIONS</p><h2>Delivery fee collections</h2></div>
-        <button className="btn primary" onClick={onNew} type="button"><Icon name="plus" size={16} /> Record cash</button>
+        <div><p className="eyebrow">OPERATIONS PROCESS</p><h2>Rider fee collections</h2></div>
+        <strong>{money(totalCashHeld)} held</strong>
       </div>
-      <div className="cash-summary-grid">
-        <div className="glass"><small>VISIBLE TOTAL</small><strong>{money(totalCollected)}</strong></div>
-        <div className="glass"><small>PENDING</small><strong>{pendingCount}</strong></div>
-        <div className="glass"><small>CONFIRMED</small><strong>{confirmedCount}</strong></div>
-      </div>
-      <div className="filter-toolbar cash-filters">
-        <div className="search-box"><Icon name="wallet" size={16} /><input disabled value={`${filteredCollections.length} collection records`} /></div>
-        <select onChange={(event) => update("status", event.target.value)} value={filters.status}>
-          <option value="all">All confirmation states</option>
-          <option value="pending">Pending confirmation</option>
-          <option value="confirmed">Confirmed only</option>
-        </select>
-        <select onChange={(event) => update("riderId", event.target.value)} value={filters.riderId}>
+      <div className="filter-toolbar compact">
+        <div className="search-box"><Icon name="search" size={16} /><input onChange={(event) => update("search", event.target.value)} placeholder="Search rider, phone, area..." value={filters.search} /></div>
+        <select onChange={(event) => update("holding", event.target.value)} value={filters.holding}>
+          <option value="positive">Holding fees</option>
           <option value="all">All riders</option>
-          {riders.map((rider) => <option key={rider._apiId} value={rider._apiId}>{rider.name}</option>)}
         </select>
       </div>
-      <div className="table-wrap">
-        <table>
-          <thead><tr><th>Order</th><th>Rider</th><th>Delivery fee</th><th>Note</th><th>Confirmed</th><th /></tr></thead>
-          <tbody>
-            {filteredCollections.map((collection) => (
-              <tr key={collection.id}>
-                <td><strong>{collection.orderCode}</strong><small>{collection.createdAt}</small></td>
-                <td>{collection.riderName || riders.find((rider) => rider._apiId === collection.riderApiId)?.name || "Unassigned"}</td>
-                <td><strong>{money(collection.deliveryFeeCollected)}</strong></td>
-                <td>{collection.paymentNote || <span className="muted">No note</span>}</td>
-                <td>{collection.confirmedAt ? <StatusBadge status="confirmed" /> : <StatusBadge status="pending" />}{collection.confirmedAt && <small>{collection.confirmedAt}</small>}</td>
-                <td>
-                  <div className="inline-actions">
-                    {!collection.confirmedAt && (
-                      <button
-                        className="icon-btn small"
-                        onClick={() => onConfirm(collection)}
-                        title="Confirm collection"
-                        type="button"
-                      >
-                        <Icon name="check" size={15} />
-                      </button>
-                    )}
-                    <button className="icon-btn small" onClick={() => onEdit(collection)} title="Edit collection" type="button"><Icon name="settings" size={15} /></button>
-                    <button
-                      className="icon-btn small danger"
-                      onClick={() => window.confirm(`Delete cash record for ${collection.orderCode}?`) && onDelete(collection.id)}
-                      title="Delete collection"
-                      type="button"
-                    >
-                      <Icon name="close" size={15} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {filteredCollections.length === 0 && (
-              <tr><td colSpan="6"><span className="muted">{collections.length === 0 ? "No delivery fee collections recorded yet. Use Record cash to create the first record." : "No cash collections match the current filters."}</span></td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <div className="table-wrap"><table><thead><tr><th>Rider</th><th>Status</th><th>Current area</th><th>Active orders</th><th>Delivery fees held</th><th /></tr></thead><tbody>
+        {riders.map((rider) => (
+          <tr key={rider.id}>
+            <td><span className="rider-cell"><i>{rider.initials}</i><span><strong>{rider.name}</strong><small>{rider.phone}</small></span></span></td>
+            <td><StatusBadge status={rider.status} /></td>
+            <td>{rider.area}</td>
+            <td>{rider.activeOrders}</td>
+            <td><strong>{money(rider.cashHeld)}</strong></td>
+            <td>
+              <button className="btn secondary" disabled={Number(rider.cashHeld || 0) <= 0} onClick={() => onCollect(rider)} type="button">
+                <Icon name="wallet" size={15} /> Collect
+              </button>
+            </td>
+          </tr>
+        ))}
+        {riders.length === 0 && (
+          <tr>
+            <td colSpan="6"><span className="muted">No rider held delivery fees match this filter.</span></td>
+          </tr>
+        )}
+      </tbody></table></div>
+      <TablePagination label="riders" pagination={pagination} />
     </section>
   );
 }
 
-function UsersAdmin({ onDelete, onEdit, onNew, users }) {
+function UsersAdmin({ onDelete, onEdit, onNew, pagination, users }) {
   return (
     <section className="panel glass">
       <div className="panel-heading">
@@ -577,6 +720,7 @@ function UsersAdmin({ onDelete, onEdit, onNew, users }) {
           </tbody>
         </table>
       </div>
+      <TablePagination label="users" pagination={pagination} />
     </section>
   );
 }
@@ -713,9 +857,8 @@ function AdminMap({ riders, large = false }) {
   );
 }
 
-function OrderDrawer({ cashCollections = [], order, riders, close, onAssign, onCashCollectionSave, onDelete, onEdit, onOrderSave }) {
+function OrderDrawer({ order, riders, close, onAssign, onDelete, onEdit }) {
   const rider = riders.find((item) => item.id === order.riderId);
-  const cashCollection = cashCollections.find((collection) => Number(collection.orderApiId) === Number(order._apiId));
   const creator = formatOrderCreator(order);
   return (
     <aside className="drawer glass">
@@ -754,13 +897,6 @@ function OrderDrawer({ cashCollections = [], order, riders, close, onAssign, onC
           <strong>{order.codEnabled ? (Number(order.cod) > 0 ? `On - ${money(order.cod)}` : "On") : "Off"}</strong>
         </div>
       </section>
-      <CashCollectionDrawerForm
-        collection={cashCollection}
-        onOrderSave={onOrderSave}
-        onSave={onCashCollectionSave}
-        order={order}
-        rider={rider}
-      />
       <section><p className="eyebrow">RIDER ASSIGNMENT</p>{rider ? <div className="assigned-rider"><span className="avatar">{rider.initials}</span><div><strong>{rider.name}</strong><small>{rider.phone} - {rider.vehicle}</small></div></div> : <p className="muted">No rider assigned yet.</p>}</section>
       <div className="drawer-actions">
         <button className="btn secondary" onClick={onEdit} type="button">Edit</button>
@@ -768,105 +904,6 @@ function OrderDrawer({ cashCollections = [], order, riders, close, onAssign, onC
         <button className="btn primary grow" onClick={onAssign} type="button"><Icon name="bike" size={16} /> {rider ? "Change rider" : "Assign rider"}</button>
       </div>
     </aside>
-  );
-}
-
-function CashCollectionDrawerForm({ collection, onOrderSave, onSave, order, rider }) {
-  const [form, setForm] = useState({
-    codEnabled: Boolean(order.codEnabled),
-    codAmount: order.cod || 0,
-    deliveryFeeCollected: collection?.deliveryFeeCollected ?? order.fee ?? 0,
-    paymentNote: collection?.paymentNote || "",
-    confirmed: Boolean(collection?.confirmedAt),
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const update = (key, value) => {
-    setSaved(false);
-    setForm((current) => ({ ...current, [key]: value }));
-  };
-
-  useEffect(() => {
-    setForm({
-      codEnabled: Boolean(order.codEnabled),
-      codAmount: order.cod || 0,
-      deliveryFeeCollected: collection?.deliveryFeeCollected ?? order.fee ?? 0,
-      paymentNote: collection?.paymentNote || "",
-      confirmed: Boolean(collection?.confirmedAt),
-    });
-    setSaved(false);
-  }, [collection?._apiId, collection?.confirmedAt, collection?.deliveryFeeCollected, collection?.paymentNote, order._apiId, order.cod, order.codEnabled, order.fee]);
-
-  const canRecordFee = order._apiId && (order.riderApiId || rider?._apiId);
-
-  return (
-    <section>
-      <p className="eyebrow">DELIVERY FEE COLLECTION</p>
-      {collection && (
-        <div className="detail-row"><span>Recorded fee</span><strong>{money(collection.deliveryFeeCollected)}</strong></div>
-      )}
-      <form
-        className="drawer-cash-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          setSubmitting(true);
-          await onOrderSave({
-            ...order,
-            codEnabled: form.codEnabled,
-            cod: form.codEnabled ? Number(form.codAmount || 0) : 0,
-          });
-          if (canRecordFee) {
-            await onSave({
-              _apiId: collection?._apiId,
-              id: collection?.id,
-              orderApiId: order._apiId,
-              riderApiId: order.riderApiId || rider?._apiId,
-              deliveryFeeCollected: form.deliveryFeeCollected,
-              paymentNote: form.paymentNote,
-              confirmed: form.confirmed,
-            });
-          }
-          setSubmitting(false);
-          setSaved(true);
-        }}
-      >
-        <label className="switch-row glass span-2">
-          <span><strong>COD on</strong><small>Record product payment COD on this order only</small></span>
-          <input
-            checked={form.codEnabled}
-            onChange={(event) => update("codEnabled", event.target.checked)}
-            type="checkbox"
-          />
-          <i />
-        </label>
-        {form.codEnabled && (
-          <label className="form-field span-2">
-            <span>Payment COD amount</span>
-            <input inputMode="numeric" onChange={(event) => update("codAmount", event.target.value)} value={form.codAmount} />
-          </label>
-        )}
-        <label className="form-field span-2">
-          <span>Delivery fee collected</span>
-          <input inputMode="numeric" onChange={(event) => update("deliveryFeeCollected", event.target.value)} value={form.deliveryFeeCollected} />
-        </label>
-        {!canRecordFee && (
-          <p className="muted span-2">Assign a rider before recording delivery fee collection.</p>
-        )}
-        <label className="form-field span-2">
-          <span>Payment note</span>
-          <input onChange={(event) => update("paymentNote", event.target.value)} value={form.paymentNote} />
-        </label>
-        <label className="switch-row glass span-2">
-          <span><strong>Confirmed by office</strong><small>Marks the collection as checked</small></span>
-          <input checked={form.confirmed} disabled={!canRecordFee} onChange={(event) => update("confirmed", event.target.checked)} type="checkbox" />
-          <i />
-        </label>
-        <button className="btn primary span-2" disabled={submitting} type="submit">
-          {submitting ? "Saving..." : "Save collection"}
-        </button>
-        {saved && <p className="muted span-2">Order payment details saved.</p>}
-      </form>
-    </section>
   );
 }
 
@@ -1027,7 +1064,7 @@ function RiderEditorModal({ close, onSave, rider }) {
     status: rider.status || "available",
     vehicle: rider.vehicle || "Motorbike",
     area: rider.area || "",
-    cashHeld: rider.cashHeld || 0,
+    password: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
@@ -1051,11 +1088,11 @@ function RiderEditorModal({ close, onSave, rider }) {
           <CrudField label="Rider code" onChange={(value) => update("id", value)} required value={form.id} />
           <CrudField label="Name" onChange={(value) => update("name", value)} required value={form.name} />
           <CrudField label="Phone" onChange={(value) => update("phone", value)} required value={form.phone} />
-          <CrudField label="Email" onChange={(value) => update("email", value)} value={form.email} />
+          <CrudField label="Email" onChange={(value) => update("email", value)} type="email" value={form.email} />
+          <CrudField className="span-2" label={form._apiId ? "New password" : "Password"} onChange={(value) => update("password", value)} type="password" value={form.password} />
           <CrudSelect label="Status" onChange={(value) => update("status", value)} options={["available", "online", "busy", "offline", "on_break", "suspended"]} value={form.status} />
           <CrudField label="Vehicle" onChange={(value) => update("vehicle", value)} value={form.vehicle} />
           <CrudField label="Current area" onChange={(value) => update("area", value)} value={form.area} />
-          <CrudField inputMode="numeric" label="Delivery fees held" onChange={(value) => update("cashHeld", value)} value={form.cashHeld} />
         </div>
         <div className="modal-actions">
           <button className="btn secondary" onClick={close} type="button">Cancel</button>
@@ -1066,20 +1103,17 @@ function RiderEditorModal({ close, onSave, rider }) {
   );
 }
 
-function CashCollectionEditorModal({ close, collection, onSave, orders, riders }) {
-  const firstOrder = orders.find((order) => order._apiId);
-  const firstRider = riders.find((rider) => rider._apiId);
+function RiderSettlementModal({ close, onSave, rider }) {
   const [form, setForm] = useState({
-    _apiId: collection._apiId,
-    id: collection.id,
-    orderApiId: collection.orderApiId || firstOrder?._apiId || "",
-    riderApiId: collection.riderApiId || firstRider?._apiId || "",
-    deliveryFeeCollected: collection.deliveryFeeCollected || 0,
-    paymentNote: collection.paymentNote || "",
-    confirmed: Boolean(collection.confirmedAt),
+    amount: rider.cashHeld || 0,
+    note: "",
   });
   const [submitting, setSubmitting] = useState(false);
-  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const [error, setError] = useState("");
+  const update = (key, value) => {
+    setError("");
+    setForm((current) => ({ ...current, [key]: value }));
+  };
 
   return (
     <div className="modal-backdrop">
@@ -1088,38 +1122,41 @@ function CashCollectionEditorModal({ close, collection, onSave, orders, riders }
         onSubmit={async (event) => {
           event.preventDefault();
           setSubmitting(true);
-          await onSave(form);
-          setSubmitting(false);
+          setError("");
+
+          try {
+            await onSave(form);
+          } catch (settlementError) {
+            setError(
+              settlementError?.payload?.message ||
+              Object.values(settlementError?.payload?.errors || {})?.[0]?.[0] ||
+              settlementError?.message ||
+              "Could not collect rider fees.",
+            );
+          } finally {
+            setSubmitting(false);
+          }
         }}
       >
         <div className="drawer-header">
-          <div><p className="eyebrow">CASH CRUD</p><h2>{form._apiId ? "Edit fee record" : "Record delivery fee"}</h2></div>
+          <div><p className="eyebrow">RIDER SETTLEMENT</p><h2>Collect held fees</h2></div>
           <button className="icon-btn" onClick={close} type="button"><Icon name="close" /></button>
         </div>
+        <div className="settlement-summary glass">
+          <span><Icon name="wallet" size={18} /></span>
+          <div><small>Rider</small><strong>{rider.name}</strong></div>
+          <div><small>Currently held</small><strong>{money(rider.cashHeld)}</strong></div>
+        </div>
         <div className="crud-grid">
-          <CrudSelect
-            label="Order"
-            onChange={(value) => update("orderApiId", Number(value))}
-            options={orders.filter((order) => order._apiId).map((order) => [order._apiId, `${order.id} - ${order.receiver}`])}
-            value={form.orderApiId}
-          />
-          <CrudSelect
-            label="Rider"
-            onChange={(value) => update("riderApiId", Number(value))}
-            options={riders.filter((rider) => rider._apiId).map((rider) => [rider._apiId, rider.name])}
-            value={form.riderApiId}
-          />
-          <CrudField inputMode="numeric" label="Delivery fee collected" onChange={(value) => update("deliveryFeeCollected", value)} value={form.deliveryFeeCollected} />
-          <CrudField className="span-2" label="Payment note" onChange={(value) => update("paymentNote", value)} value={form.paymentNote} />
-          <label className="switch-row glass span-2">
-            <span><strong>Confirmed by office</strong><small>Marks the cash collection as checked</small></span>
-            <input checked={form.confirmed} onChange={(event) => update("confirmed", event.target.checked)} type="checkbox" />
-            <i />
-          </label>
+          <CrudField inputMode="numeric" label="Amount collected" onChange={(value) => update("amount", value)} required value={form.amount} />
+          <CrudField className="span-2" label="Settlement note" onChange={(value) => update("note", value)} value={form.note} />
+          {error && <p className="auth-error span-2">{error}</p>}
         </div>
         <div className="modal-actions">
           <button className="btn secondary" onClick={close} type="button">Cancel</button>
-          <button className="btn primary" disabled={submitting || !form.orderApiId || !form.riderApiId} type="submit">{submitting ? "Saving..." : "Save collection"}</button>
+          <button className="btn primary" disabled={submitting || Number(form.amount || 0) <= 0} type="submit">
+            {submitting ? "Saving..." : "Collect fees"}
+          </button>
         </div>
       </form>
     </div>
@@ -1145,8 +1182,120 @@ function UserEditorModal({ close, onSave, user }) {
       <CrudField label="Email" onChange={(value) => update("email", value)} required value={form.email} />
       <CrudField label="Phone" onChange={(value) => update("phone", value)} required value={form.phone} />
       <CrudSelect label="Role" onChange={(value) => update("role", value)} options={["client", "rider", "office_admin", "super_admin"]} value={form.role} />
-      <CrudField className="span-2" label={form._apiId ? "New password" : "Password"} onChange={(value) => update("password", value)} required={!form._apiId} value={form.password} />
+      <CrudField className="span-2" label={form._apiId ? "New password" : "Password"} onChange={(value) => update("password", value)} required={!form._apiId} type="password" value={form.password} />
     </CrudModal>
+  );
+}
+
+function AdminProfilePage({ onSave, user }) {
+  const [form, setForm] = useState({
+    name: user?.name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
+    currentPassword: "",
+    password: "",
+    passwordConfirmation: "",
+    photoFile: null,
+  });
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      name: user?.name || "",
+      email: user?.email || "",
+      phone: user?.phone || "",
+    }));
+  }, [user?.email, user?.name, user?.phone]);
+
+  const update = (key, value) => {
+    setSaved(false);
+    setError("");
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  useEffect(() => {
+    if (!form.photoFile) {
+      setPhotoPreview("");
+      return undefined;
+    }
+
+    const previewUrl = URL.createObjectURL(form.photoFile);
+    setPhotoPreview(previewUrl);
+
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [form.photoFile]);
+
+  return (
+    <section className="panel glass profile-page">
+      <PanelHeading eyebrow="ACCOUNT" title="Office admin profile" />
+      <form
+        className="profile-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setSaving(true);
+          setSaved(false);
+          setError("");
+
+          if (form.password && form.password !== form.passwordConfirmation) {
+            setError("New password and confirmation do not match.");
+            setSaving(false);
+            return;
+          }
+
+          try {
+            await onSave(form);
+            setForm((current) => ({
+              ...current,
+              currentPassword: "",
+              password: "",
+              passwordConfirmation: "",
+              photoFile: null,
+            }));
+            setSaved(true);
+          } catch (profileError) {
+            setError(
+              profileError?.payload?.message ||
+              Object.values(profileError?.payload?.errors || {})?.[0]?.[0] ||
+              profileError?.message ||
+              "Could not save profile.",
+            );
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <div className="profile-summary glass">
+          <ProfileAvatar className="large" previewUrl={photoPreview} user={user} />
+          <div><strong>{user?.name || "Office user"}</strong><small>{user?.role?.replaceAll("_", " ") || "office admin"}</small></div>
+        </div>
+        <label className="photo-upload glass">
+          <ProfileAvatar previewUrl={photoPreview} user={user} />
+          <span><strong>Profile photo</strong><small>Upload a JPG or PNG up to 2 MB</small></span>
+          <input
+            accept="image/*"
+            onChange={(event) => update("photoFile", event.target.files?.[0] || null)}
+            type="file"
+          />
+        </label>
+        <div className="crud-grid">
+          <CrudField label="Full name" onChange={(value) => update("name", value)} required value={form.name} />
+          <CrudField label="Email" onChange={(value) => update("email", value)} required type="email" value={form.email} />
+          <CrudField inputMode="tel" label="Phone" onChange={(value) => update("phone", value)} required value={form.phone} />
+          <CrudField label="Current password" onChange={(value) => update("currentPassword", value)} type="password" value={form.currentPassword} />
+          <CrudField label="New password" onChange={(value) => update("password", value)} type="password" value={form.password} />
+          <CrudField label="Confirm new password" onChange={(value) => update("passwordConfirmation", value)} type="password" value={form.passwordConfirmation} />
+          {error && <p className="auth-error span-2">{error}</p>}
+          {saved && <p className="profile-success span-2">Profile saved.</p>}
+        </div>
+        <div className="profile-actions">
+          <button className="btn primary" disabled={saving} type="submit">{saving ? "Saving..." : "Save profile"}</button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -1307,11 +1456,11 @@ function CrudModal({ children, close, error = "", eyebrow, onSave, setSubmitting
   );
 }
 
-function CrudField({ className = "", disabled = false, inputMode, label, onChange, required = false, value }) {
+function CrudField({ className = "", disabled = false, inputMode, label, onChange, required = false, type = "text", value }) {
   return (
     <label className={`form-field ${className}`}>
       <span>{label}</span>
-      <input disabled={disabled} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} required={required} value={value} />
+      <input disabled={disabled} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} required={required} type={type} value={value} />
     </label>
   );
 }

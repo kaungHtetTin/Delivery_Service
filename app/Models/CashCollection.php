@@ -17,14 +17,12 @@ class CashCollection extends Model
         'delivery_fee_collected',
         'total_cash_collected',
         'payment_note',
-        'confirmed_at',
     ];
 
     protected $casts = [
         'product_cash_collected' => 'decimal:2',
         'delivery_fee_collected' => 'decimal:2',
         'total_cash_collected' => 'decimal:2',
-        'confirmed_at' => 'datetime',
     ];
 
     public function deliveryOrder(): BelongsTo
