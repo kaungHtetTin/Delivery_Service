@@ -97,7 +97,7 @@ const errorMessage = (error) =>
   error?.message ||
   "Something went wrong.";
 
-export default function App({ apiBaseUrl, initialPortal = "client" }) {
+export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "client" }) {
   const portal = portals.has(initialPortal) ? initialPortal : "client";
   const [auth, setAuth] = useStoredState("flowdrop.auth", null);
   const [orders, setOrders] = useState([]);
@@ -129,6 +129,11 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     () => ({ setAppIconUrl, setAppName, setBrand, setContactEmail, setContactPhone, setFaviconUrl }),
     [setAppIconUrl, setAppName, setBrand, setContactEmail, setContactPhone, setFaviconUrl],
   );
+  const mapTileUrl = useMemo(() => {
+    const base = appBaseUrl || window.location.origin;
+
+    return `${base.replace(/\/$/, "")}/map-tiles/{z}/{x}/{y}`;
+  }, [appBaseUrl]);
   const requiredRoles = portalRoles[portal];
   const hasPortalAccess = auth?.user && requiredRoles.includes(auth.user.role);
 
@@ -810,6 +815,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
             contactEmail={contactEmail}
             contactPhone={contactPhone}
             markNotificationRead={markNotificationRead}
+            mapTileUrl={mapTileUrl}
             notifications={notifications}
             onLogout={handleLogout}
             onThemeChange={setTheme}
@@ -827,7 +833,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           user={auth.user}
         />
       )}
-      {portal === "rider" && <RiderPortal appIconUrl={appIconUrl} appName={appName} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onLogout={handleLogout} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} onThemeChange={setTheme} orders={orders} progressOrder={progressOrder} riders={riders} saveProfile={saveCurrentUserProfile} theme={theme} user={auth.user} />}
+      {portal === "rider" && <RiderPortal appIconUrl={appIconUrl} appName={appName} mapTileUrl={mapTileUrl} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onLogout={handleLogout} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} onThemeChange={setTheme} orders={orders} progressOrder={progressOrder} riders={riders} saveProfile={saveCurrentUserProfile} theme={theme} user={auth.user} />}
       {portal === "admin" && (
         <AdminPortal
           appName={appName}
@@ -839,6 +845,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           financeCategories={financeCategories}
           financeSummary={financeSummary}
           financeTransactions={financeTransactions}
+          mapTileUrl={mapTileUrl}
           onRefreshFinance={refreshFinanceData}
           onThemeChange={setTheme}
           orders={orders}

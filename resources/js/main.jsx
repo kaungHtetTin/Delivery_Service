@@ -7,7 +7,7 @@ const root = document.getElementById("root");
 
 createRoot(root).render(
   <StrictMode>
-    <DeliveryApp apiBaseUrl={root.dataset.apiBaseUrl} initialPortal={root.dataset.portal} />
+    <DeliveryApp appBaseUrl={root.dataset.appBaseUrl} apiBaseUrl={root.dataset.apiBaseUrl} initialPortal={root.dataset.portal} />
   </StrictMode>,
 );
 

@@ -50,7 +50,7 @@ function distanceLabel(distance) {
   return distance < 1000 ? `${Math.round(distance)}m away` : `${(distance / 1000).toFixed(1)}km away`;
 }
 
-export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, shops = [], submitOrder, theme, user }) {
+export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, shops = [], submitOrder, theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.client.page", "home");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.client.selectedOrder", null);
   const activeOrder = orders.find((order) => activeStatuses.has(order.status));
@@ -113,6 +113,7 @@ export function ClientPortal({ addresses = [], appIconUrl = "", appName, contact
         )}
         {page === "tracking" && (
           <TrackingView
+            mapTileUrl={mapTileUrl}
             onDelete={deleteOrder}
             onEdit={editOrder}
             onBack={() => setPage("orders")}
@@ -766,7 +767,7 @@ function ReviewSection({ label, title, lines }) {
   );
 }
 
-function ClientLiveTrackingMap({ order }) {
+function ClientLiveTrackingMap({ mapTileUrl, order }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const riderMarkerRef = useRef(null);
@@ -827,7 +828,7 @@ function ClientLiveTrackingMap({ order }) {
       zoomControl: false,
     }).setView([location.latitude, location.longitude], 15);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer(mapTileUrl, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map);
@@ -968,7 +969,7 @@ function ClientLiveTrackingMap({ order }) {
   );
 }
 
-function TrackingView({ order, onBack, onDelete, onEdit }) {
+function TrackingView({ mapTileUrl, order, onBack, onDelete, onEdit }) {
   if (!order) return null;
   const steps = ["pending", "rider_assigned", "rider_accepted", "picked_up", "delivered"];
   const trackingIndex = {
@@ -999,7 +1000,7 @@ function TrackingView({ order, onBack, onDelete, onEdit }) {
         <div><p className="eyebrow">DELIVERY TRACKING</p><h1>{order.id}</h1></div>
         <StatusBadge status={order.status} />
       </div>
-      <ClientLiveTrackingMap order={order} />
+      <ClientLiveTrackingMap mapTileUrl={mapTileUrl} order={order} />
       <div className="tracking-status glass">
         <p className="eyebrow">CURRENT STATUS</p>
         <h2>{statusLabels[order.status]}</h2>

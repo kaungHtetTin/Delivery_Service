@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\MapTileController;
 use App\Models\SystemSetting;
 
 /*
@@ -15,6 +16,9 @@ use App\Models\SystemSetting;
 */
 
 Route::get('/', fn () => redirect()->route('client'));
+Route::get('/map-tiles/{z}/{x}/{y}', [MapTileController::class, 'show'])
+    ->whereNumber(['z', 'x', 'y'])
+    ->name('map-tiles.show');
 Route::get('/app.webmanifest', function () {
     $settings = SystemSetting::query()
         ->whereIn('key', ['app_name', 'brand_color', 'app_icon'])

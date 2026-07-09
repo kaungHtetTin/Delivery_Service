@@ -67,7 +67,7 @@ function shouldDropQueuedLocation(error) {
   return discardableFields.some((field) => validationErrors[field]);
 }
 
-export function RiderPortal({ appIconUrl = "", appName, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, riders, saveProfile, theme, user }) {
+export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, riders, saveProfile, theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
@@ -124,7 +124,7 @@ export function RiderPortal({ appIconUrl = "", appName, markNotificationRead, no
       <main className="mobile-content">
         {page === "jobs" && <RiderJobs gpsTracking={gpsTracking} onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}
-        {page === "gps" && <GpsStatus activeOrders={activeOrders} gpsTracking={gpsTracking} rider={rider} />}
+        {page === "gps" && <GpsStatus activeOrders={activeOrders} gpsTracking={gpsTracking} mapTileUrl={mapTileUrl} rider={rider} />}
         {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
         {page === "account" && <RiderAccount onLogout={onLogout} rider={rider} saveProfile={saveProfile} user={user} />}
       </main>
@@ -1145,7 +1145,7 @@ function RiderJobDetail({ gpsTracking, history = false, onComplete, order, onBac
   );
 }
 
-function GpsStatus({ activeOrders, gpsTracking, rider }) {
+function GpsStatus({ activeOrders, gpsTracking, mapTileUrl, rider }) {
   const position = gpsTracking.lastPosition;
   const queuedLabel = gpsTracking.queuedCount > 0
     ? `${gpsTracking.queuedCount} location update${gpsTracking.queuedCount === 1 ? "" : "s"} waiting to sync`
@@ -1166,7 +1166,7 @@ function GpsStatus({ activeOrders, gpsTracking, rider }) {
         <h2>{gpsTracking.dutyActive ? "Active duty tracking" : "GPS tracking is off"}</h2>
         <p>{gpsTracking.dutyActive ? "Your working-hours location is shared with office operations." : "Tap Start active when you are ready to receive assignments."}</p>
       </div>
-      {gpsTracking.dutyActive && <RiderGpsMap position={position} />}
+      {gpsTracking.dutyActive && <RiderGpsMap mapTileUrl={mapTileUrl} position={position} />}
       <div className="privacy-note glass">
         <span><Icon name="lock" size={16} /></span>
         <p>
@@ -1199,7 +1199,7 @@ function GpsStatus({ activeOrders, gpsTracking, rider }) {
   );
 }
 
-function RiderGpsMap({ position }) {
+function RiderGpsMap({ mapTileUrl, position }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
@@ -1215,7 +1215,7 @@ function RiderGpsMap({ position }) {
       zoomControl: false,
     }).setView([position.latitude, position.longitude], 16);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer(mapTileUrl, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map);

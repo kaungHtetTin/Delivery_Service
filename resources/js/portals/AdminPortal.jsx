@@ -115,6 +115,7 @@ export function AdminPortal({
   financeCategories = [],
   financeSummary,
   financeTransactions = [],
+  mapTileUrl,
   onRefreshFinance,
   removeCommissionRule,
   removeFinanceCategory,
@@ -337,7 +338,7 @@ export function AdminPortal({
                 </div>
                 <div className="panel map-panel glass">
                   <PanelHeading title="Live rider map" eyebrow="LOCATION" action="Open tracking map" onAction={() => setPage("tracking")} />
-                  <AdminMap onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} />
+                  <AdminMap mapTileUrl={mapTileUrl} onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} />
                 </div>
                 <div className="panel glass">
                   <PanelHeading title="Attention needed" eyebrow="ALERTS" />
@@ -369,6 +370,7 @@ export function AdminPortal({
               onOpenOrder={setSelectedOrderId}
               orders={currentOperationOrders}
               rider={riders.find((item) => item.id === selectedRiderId) || riders[0]}
+              mapTileUrl={mapTileUrl}
             />
           )}
           {activePage === "collections" && <RiderCollectionsAdmin filters={collectionFilters} onCollect={setSettlementRider} onFilterChange={setCollectionFilters} pagination={collectionsPagination} riders={collectionsPagination.items} totalCashHeld={totalCashHeld} />}
@@ -397,7 +399,7 @@ export function AdminPortal({
           )}
           {activePage === "users" && <UsersAdmin onDelete={removeUser} onEdit={(user) => setUserEditor(user)} onNew={() => setUserEditor({})} pagination={usersPagination} users={usersPagination.items} />}
           {activePage === "settings" && <SettingsAdmin onDelete={removeSetting} onEdit={(setting) => setSettingEditor(setting)} onNew={() => setSettingEditor({})} onSaveSetting={saveSetting} onUploadAsset={uploadSettingImage} settings={settings} />}
-          {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
+          {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large mapTileUrl={mapTileUrl} onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
           {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
           {!["dashboard", "orders", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
@@ -878,7 +880,7 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, onView,
   );
 }
 
-function RiderDetailPage({ onBack, onCollect, onEdit, onOpenOrder, orders, rider }) {
+function RiderDetailPage({ mapTileUrl, onBack, onCollect, onEdit, onOpenOrder, orders, rider }) {
   if (!rider) {
     return (
       <section className="panel placeholder admin-placeholder glass">
@@ -929,7 +931,7 @@ function RiderDetailPage({ onBack, onCollect, onEdit, onOpenOrder, orders, rider
       <section className="rider-detail-grid">
         <div className="panel glass rider-detail-map-panel">
           <PanelHeading title="Current position" eyebrow="LIVE MAP" />
-          <RiderDetailMap rider={rider} />
+          <RiderDetailMap mapTileUrl={mapTileUrl} rider={rider} />
         </div>
         <div className="panel glass">
           <PanelHeading title="Live information" eyebrow="GPS & OPERATIONS" />
@@ -970,7 +972,7 @@ function RiderDetailPage({ onBack, onCollect, onEdit, onOpenOrder, orders, rider
   );
 }
 
-function RiderDetailMap({ rider }) {
+function RiderDetailMap({ mapTileUrl, rider }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const markerLayerRef = useRef(null);
@@ -987,7 +989,7 @@ function RiderDetailMap({ rider }) {
       zoomControl: true,
     }).setView([16.8409, 96.1735], 12);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer(mapTileUrl, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map);
@@ -1671,7 +1673,7 @@ function CrudActions({ label, onDelete, onEdit }) {
   );
 }
 
-function AdminMap({ large = false, onSelectOrder, orders = [], riders }) {
+function AdminMap({ large = false, mapTileUrl, onSelectOrder, orders = [], riders }) {
   const mapNodeRef = useRef(null);
   const mapRef = useRef(null);
   const markerLayerRef = useRef(null);
@@ -1724,7 +1726,7 @@ function AdminMap({ large = false, onSelectOrder, orders = [], riders }) {
       zoomControl: true,
     }).setView([16.8409, 96.1735], 12);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer(mapTileUrl, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map);
