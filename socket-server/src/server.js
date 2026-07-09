@@ -19,7 +19,7 @@ export function loadConfig(env = process.env) {
     allowUnsignedAuth: env.ALLOW_UNSIGNED_AUTH === "true",
     nodeEnv: env.NODE_ENV || "development",
     publishRateLimit: Number(env.PUBLISH_RATE_LIMIT || 120),
-    publishRateWindowMs: Number(env.PUBLISH_RATE_WINDOW_MS || 60_000),
+    publishRateWindowMs: Number(env.PUBLISH_RATE_WINDOW_MS || 60000),
   };
 }
 
@@ -229,12 +229,6 @@ export function createRealtimeServer(config = loadConfig()) {
 
 export function start(config = loadConfig()) {
   const problems = validateConfig(config);
-
-  if (problems.length && config.nodeEnv === "production") {
-    problems.forEach((problem) => logger.error("config_invalid", { problem }));
-    process.exitCode = 1;
-    return null;
-  }
 
   problems.forEach((problem) => logger.warn("config_warning", { problem }));
 

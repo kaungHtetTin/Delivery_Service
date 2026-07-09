@@ -72,7 +72,15 @@ PUBLISH_RATE_LIMIT=120
 PUBLISH_RATE_WINDOW_MS=60000
 ```
 
-When `NODE_ENV=production`, startup fails if unsigned auth is enabled or required secrets are missing.
+When `NODE_ENV=production`, the status page shows a configuration warning if unsigned auth is enabled or required secrets are missing.
+
+For Hostinger Node.js hosting, set the entry file to:
+
+```text
+app.js
+```
+
+`src/server.js` exports the server for tests and local tooling. `app.js` calls `start()` directly so Hostinger can detect `listen()` during startup.
 
 ## CORS
 
@@ -94,7 +102,7 @@ PM2:
 
 ```powershell
 cd socket-server
-pm2 start src/server.js --name flowdrop-socket
+pm2 start app.js --name flowdrop-socket
 pm2 save
 ```
 
@@ -107,7 +115,7 @@ After=network.target
 
 [Service]
 WorkingDirectory=/var/www/delivery/socket-server
-ExecStart=/usr/bin/node src/server.js
+ExecStart=/usr/bin/node app.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production

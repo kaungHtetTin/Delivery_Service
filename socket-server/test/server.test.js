@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { io as createSocketClient } from "socket.io-client";
-import { createRealtimeServer } from "../src/server.js";
+import { createRealtimeServer, start } from "../src/server.js";
 import { emitDomainEvent } from "../src/events.js";
 
 const config = {
@@ -66,6 +66,34 @@ test("routes endpoint returns route and socket event inventory", async () => {
   assert.ok(payload.routes.some((route) => route.method === "GET" && route.path === "/"));
   assert.ok(payload.routes.some((route) => route.method === "POST" && route.path === "/events/notification"));
   assert.ok(payload.socketEvents.some((socketEvent) => socketEvent.event === "socket:ready"));
+});
+
+test("production startup still listens when env configuration is incomplete", async () => {
+  const incompleteRuntime = start({
+    host: "127.0.0.1",
+    port: 0,
+    corsOrigins: [],
+    internalApiKey: "",
+    socketAuthSecret: "",
+    allowUnsignedAuth: false,
+    nodeEnv: "production",
+    publishRateLimit: 120,
+    publishRateWindowMs: 60_000,
+  });
+
+  assert.ok(incompleteRuntime);
+  await new Promise((resolve) => incompleteRuntime.server.once("listening", resolve));
+
+  const address = incompleteRuntime.server.address();
+  const response = await fetch(`http://127.0.0.1:${address.port}/`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /Needs attention/);
+  assert.match(html, /Internal API key/);
+
+  incompleteRuntime.io.close();
+  await new Promise((resolve) => incompleteRuntime.server.close(resolve));
 });
 
 test("unauthorized publish calls are rejected", async () => {
