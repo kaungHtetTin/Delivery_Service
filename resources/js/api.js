@@ -423,6 +423,56 @@ export function mapSetting(setting) {
   };
 }
 
+export function mapFinanceCategory(category) {
+  return {
+    _apiId: category.id,
+    id: `FIN-CAT-${category.id}`,
+    name: category.name,
+    type: category.type,
+    description: category.description || "",
+    isActive: Boolean(category.is_active),
+  };
+}
+
+export function mapFinanceTransaction(transaction) {
+  return {
+    _apiId: transaction.id,
+    id: `FIN-${transaction.id}`,
+    type: transaction.type,
+    categoryId: transaction.category_id || "",
+    categoryName: transaction.category?.name || "",
+    amount: Number(transaction.amount),
+    paymentMethod: transaction.payment_method || "cash",
+    transactionDate: transaction.transaction_date ? dateInputValue(transaction.transaction_date) : "",
+    description: transaction.description || "",
+    referenceType: transaction.reference_type || "",
+    referenceId: transaction.reference_id || "",
+    riderId: transaction.rider_id || "",
+    riderName: transaction.rider?.name || "",
+    orderApiId: transaction.delivery_order_id || "",
+    orderCode: transaction.delivery_order?.code || "",
+    customerId: transaction.customer_id || "",
+    customerName: transaction.customer?.name || "",
+    clientUserId: transaction.client_user_id || "",
+    clientName: transaction.client_user?.name || transaction.delivery_order?.client_user?.name || "",
+    createdAt: transaction.created_at ? new Date(transaction.created_at).toLocaleString() : "Just now",
+  };
+}
+
+export function mapCommissionRule(rule) {
+  return {
+    _apiId: rule.id,
+    id: `COM-${rule.id}`,
+    riderId: rule.rider_id || "",
+    riderName: rule.rider?.name || "",
+    name: rule.name,
+    type: rule.type,
+    fixedAmount: Number(rule.fixed_amount || 0),
+    percentage: Number(rule.percentage || 0),
+    isActive: Boolean(rule.is_active),
+  };
+}
+
 export function formatSettingValue(value) {
   if (value === null || value === undefined || value === "") {
     return "—";
@@ -741,6 +791,19 @@ export async function updateSetting(setting) {
   return mapSetting(response);
 }
 
+export async function uploadSettingAsset(key, file) {
+  const body = new FormData();
+  body.append("key", key);
+  body.append("image", file);
+
+  const response = await request("/settings/assets", {
+    method: "POST",
+    body,
+  });
+
+  return mapSetting(response);
+}
+
 export async function deleteSetting(setting) {
   return request(`/settings/${setting._apiId}`, { method: "DELETE" });
 }
@@ -774,6 +837,8 @@ export async function collectRiderHeldFees(rider, payload) {
     method: "POST",
     body: JSON.stringify({
       amount: Number(payload.amount || 0),
+      payment_method: payload.paymentMethod || "cash",
+      rider_oil_cost: Number(payload.riderOilCost || 0),
       note: payload.note || null,
     }),
   });
@@ -781,7 +846,110 @@ export async function collectRiderHeldFees(rider, payload) {
   return {
     rider: mapRider(response.rider),
     settlement: response.settlement,
+    financeTransaction: response.finance_transaction ? mapFinanceTransaction(response.finance_transaction) : null,
+    riderOilTransaction: response.rider_oil_transaction ? mapFinanceTransaction(response.rider_oil_transaction) : null,
   };
+}
+
+export async function fetchFinanceCategories() {
+  const response = await request("/finance/categories");
+  return response.data.map(mapFinanceCategory);
+}
+
+export async function createFinanceCategory(category) {
+  const response = await request("/finance/categories", {
+    method: "POST",
+    body: JSON.stringify(financeCategoryPayload(category)),
+  });
+
+  return mapFinanceCategory(response);
+}
+
+export async function updateFinanceCategory(category) {
+  const response = await request(`/finance/categories/${category._apiId}`, {
+    method: "PATCH",
+    body: JSON.stringify(financeCategoryPayload(category)),
+  });
+
+  return mapFinanceCategory(response);
+}
+
+export async function deleteFinanceCategory(category) {
+  const response = await request(`/finance/categories/${category._apiId}`, { method: "DELETE" });
+  return response.category ? mapFinanceCategory(response.category) : null;
+}
+
+export async function fetchFinanceTransactions(params = {}) {
+  return requestAllPages("/finance/transactions", mapFinanceTransaction, {
+    params: compactQueryParams(params),
+    perPage: 100,
+  });
+}
+
+export async function createFinanceTransaction(transaction) {
+  const response = await request("/finance/transactions", {
+    method: "POST",
+    body: JSON.stringify(financeTransactionPayload(transaction)),
+  });
+
+  return mapFinanceTransaction(response);
+}
+
+export async function updateFinanceTransaction(transaction) {
+  const response = await request(`/finance/transactions/${transaction._apiId}`, {
+    method: "PATCH",
+    body: JSON.stringify(financeTransactionPayload(transaction)),
+  });
+
+  return mapFinanceTransaction(response);
+}
+
+export async function deleteFinanceTransaction(transaction) {
+  return request(`/finance/transactions/${transaction._apiId}`, { method: "DELETE" });
+}
+
+export async function fetchFinanceSummary(params = {}) {
+  const query = new URLSearchParams(compactQueryParams(params));
+
+  return request(`/finance/transactions/summary${query.toString() ? `?${query}` : ""}`);
+}
+
+export async function fetchCommissionRules() {
+  const response = await request("/commission-rules");
+  return response.data.map(mapCommissionRule);
+}
+
+export async function createCommissionRule(rule) {
+  const response = await request("/commission-rules", {
+    method: "POST",
+    body: JSON.stringify(commissionRulePayload(rule)),
+  });
+
+  return mapCommissionRule(response);
+}
+
+export async function updateCommissionRule(rule) {
+  const response = await request(`/commission-rules/${rule._apiId}`, {
+    method: "PATCH",
+    body: JSON.stringify(commissionRulePayload(rule)),
+  });
+
+  return mapCommissionRule(response);
+}
+
+export async function deleteCommissionRule(rule) {
+  return request(`/commission-rules/${rule._apiId}`, { method: "DELETE" });
+}
+
+function compactQueryParams(params = {}) {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => (
+      value !== undefined &&
+      value !== null &&
+      value !== "" &&
+      value !== "all"
+    )),
+  );
 }
 
 export async function createDeliveryOrder(order) {
@@ -977,6 +1145,41 @@ function settingPayload(setting) {
     value: serializeSettingValue(setting.value),
     group: setting.group || "general",
     description: setting.description || null,
+  };
+}
+
+function financeCategoryPayload(category) {
+  return {
+    name: category.name,
+    type: category.type,
+    description: category.description || null,
+    is_active: category.isActive,
+  };
+}
+
+function financeTransactionPayload(transaction) {
+  return {
+    type: transaction.type,
+    category_id: transaction.categoryId || null,
+    amount: Number(transaction.amount || 0),
+    payment_method: transaction.paymentMethod || "cash",
+    transaction_date: transaction.transactionDate || null,
+    description: transaction.description || null,
+    rider_id: transaction.riderId || null,
+    delivery_order_id: transaction.orderApiId || null,
+    customer_id: transaction.customerId || null,
+    client_user_id: transaction.clientUserId || null,
+  };
+}
+
+function commissionRulePayload(rule) {
+  return {
+    rider_id: rule.riderId || null,
+    name: rule.name,
+    type: rule.type,
+    fixed_amount: Number(rule.fixedAmount || 0),
+    percentage: Number(rule.percentage || 0),
+    is_active: rule.isActive,
   };
 }
 

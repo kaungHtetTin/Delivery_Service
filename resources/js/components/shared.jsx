@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Icon } from "../icons";
 import { statusLabels } from "../data";
 
@@ -24,11 +23,13 @@ export function StatusBadge({ status }) {
   );
 }
 
-export function Logo({ appName = "FlowDrop", compact = false }) {
+export function Logo({ appIconUrl = "", appName = "FlowDrop", compact = false }) {
   return (
     <div className="logo">
       <span className="logo-mark">
-        <Icon name="navigation" size={17} />
+        {appIconUrl
+          ? <img alt="" src={appIconUrl} />
+          : <Icon name="navigation" size={17} />}
       </span>
       {!compact && (
         <span>
@@ -40,71 +41,19 @@ export function Logo({ appName = "FlowDrop", compact = false }) {
   );
 }
 
-export function ThemeControl({ theme, setTheme, brand, setBrand }) {
-  const [open, setOpen] = useState(false);
+export function DayNightToggle({ onChange, theme = "light" }) {
+  const nextTheme = theme === "dark" ? "light" : "dark";
+
   return (
-    <div className="theme-control">
-      <button
-        aria-label="Customize appearance"
-        className="icon-btn"
-        onClick={() => setOpen(!open)}
-        type="button"
-      >
-        <Icon name="palette" />
-      </button>
-      {open && (
-        <div className="theme-popover glass">
-          <div className="popover-heading">
-            <div>
-              <strong>Appearance</strong>
-              <small>Applied across every portal</small>
-            </div>
-            <button className="icon-btn small" onClick={() => setOpen(false)} type="button">
-              <Icon name="close" size={15} />
-            </button>
-          </div>
-          <label className="field-label">Theme mode</label>
-          <div className="segmented">
-            {[
-              ["light", "sun", "Light"],
-              ["dark", "moon", "Dark"],
-            ].map(([value, icon, label]) => (
-              <button
-                className={theme === value ? "active" : ""}
-                key={value}
-                onClick={() => setTheme(value)}
-                type="button"
-              >
-                <Icon name={icon} size={15} />
-                {label}
-              </button>
-            ))}
-          </div>
-          <label className="field-label" htmlFor="brand-color">
-            Brand color
-          </label>
-          <div className="color-row">
-            {["#087f74", "#2563eb", "#7c3aed", "#c2410c"].map((color) => (
-              <button
-                aria-label={`Use ${color} as brand color`}
-                className={`color-swatch ${brand === color ? "selected" : ""}`}
-                key={color}
-                onClick={() => setBrand(color)}
-                style={{ backgroundColor: color }}
-                type="button"
-              />
-            ))}
-            <input
-              aria-label="Custom brand color"
-              id="brand-color"
-              onChange={(event) => setBrand(event.target.value)}
-              type="color"
-              value={brand}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+    <button
+      aria-label={`Switch to ${nextTheme} mode`}
+      className="icon-btn"
+      onClick={() => onChange?.(nextTheme)}
+      title={`Switch to ${nextTheme} mode`}
+      type="button"
+    >
+      <Icon name={theme === "dark" ? "sun" : "moon"} />
+    </button>
   );
 }
 
@@ -112,13 +61,13 @@ function countBadgeLabel(count) {
   return count > 99 ? "99+" : String(count);
 }
 
-export function MobileTopbar({ appName, onNotifications, title, themeProps, unreadCount = 0 }) {
+export function MobileTopbar({ appIconUrl = "", appName, onNotifications, onThemeChange, theme = "light", title, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
-      <Logo appName={appName} />
+      <Logo appIconUrl={appIconUrl} appName={appName} />
       {title && <span className="topbar-title">{title}</span>}
       <div className="topbar-actions">
-        <ThemeControl {...themeProps} />
+        <DayNightToggle onChange={onThemeChange} theme={theme} />
         <button aria-label="Notifications" className="icon-btn notification-btn" onClick={onNotifications} type="button">
           <Icon name="bell" />
           {unreadCount > 0 && <span>{countBadgeLabel(unreadCount)}</span>}

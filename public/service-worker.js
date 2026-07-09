@@ -1,12 +1,16 @@
-const CACHE_NAME = "flowdrop-app-v1";
+const CACHE_NAME = "flowdrop-app-v2";
+const scopePath = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+const scoped = (path) => `${scopePath}${path.startsWith("/") ? path : `/${path}`}`;
 const APP_SHELL = [
-  "/",
-  "/client",
-  "/rider",
-  "/office",
-  "/offline.html",
-  "/flowdrop-icon.svg",
-  "/manifest.webmanifest"
+  scoped("/"),
+  scoped("/client"),
+  scoped("/rider"),
+  scoped("/office"),
+  scoped("/offline.html"),
+  scoped("/flowdrop-icon.svg"),
+  scoped("/pwa-icon-192.png"),
+  scoped("/pwa-icon-512.png"),
+  scoped("/app.webmanifest")
 ];
 
 self.addEventListener("install", (event) => {
@@ -29,7 +33,7 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  if (request.method !== "GET" || url.pathname.startsWith("/api")) {
+  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith(scoped("/api"))) {
     return;
   }
 
@@ -41,7 +45,7 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           return response;
         })
-        .catch(() => caches.match(request).then((cached) => cached || caches.match("/offline.html")))
+        .catch(() => caches.match(request).then((cached) => cached || caches.match(scoped("/offline.html"))))
     );
     return;
   }

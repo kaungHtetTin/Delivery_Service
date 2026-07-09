@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AdminLog;
 use App\Models\DeliveryOrder;
+use App\Models\FinanceCategory;
+use App\Models\FinanceTransaction;
 use App\Models\Rider;
 use App\Models\RiderLocation;
 use App\Models\RiderSettlement;
@@ -144,6 +146,8 @@ class RiderController extends Controller
     {
         $validated = $request->validate([
             'amount' => ['required', 'numeric', 'min:1'],
+            'payment_method' => ['nullable', Rule::in(FinanceTransaction::PAYMENT_METHODS)],
+            'rider_oil_cost' => ['nullable', 'numeric', 'min:0'],
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -151,6 +155,7 @@ class RiderController extends Controller
             $lockedRider = Rider::query()->lockForUpdate()->findOrFail($rider->id);
             $cashHeldBefore = (float) $lockedRider->cash_held;
             $amount = (float) $validated['amount'];
+            $riderOilCost = (float) ($validated['rider_oil_cost'] ?? 0);
 
             if ($amount > $cashHeldBefore) {
                 throw ValidationException::withMessages([
@@ -164,6 +169,8 @@ class RiderController extends Controller
                 'rider_id' => $lockedRider->id,
                 'collected_by' => $request->user()?->id,
                 'amount' => $amount,
+                'payment_method' => $validated['payment_method'] ?? 'cash',
+                'rider_oil_cost' => $riderOilCost,
                 'cash_held_before' => $cashHeldBefore,
                 'cash_held_after' => $cashHeldAfter,
                 'note' => $validated['note'] ?? null,
@@ -171,6 +178,40 @@ class RiderController extends Controller
             ]);
 
             $lockedRider->update(['cash_held' => $cashHeldAfter]);
+
+            $category = FinanceCategory::deliveryFeeIncomeCategory($request->user()?->id);
+            $financeTransaction = FinanceTransaction::create([
+                'type' => FinanceTransaction::TYPE_INCOME,
+                'category_id' => $category->id,
+                'amount' => $amount,
+                'payment_method' => $settlement->payment_method,
+                'transaction_date' => $settlement->collected_at->toDateString(),
+                'description' => "Delivery fees collected from {$lockedRider->name}.",
+                'reference_type' => RiderSettlement::class,
+                'reference_id' => $settlement->id,
+                'rider_id' => $lockedRider->id,
+                'created_by' => $request->user()?->id,
+                'updated_by' => $request->user()?->id,
+            ]);
+
+            $riderOilTransaction = null;
+
+            if ($riderOilCost > 0) {
+                $oilCategory = FinanceCategory::riderOilExpenseCategory($request->user()?->id);
+                $riderOilTransaction = FinanceTransaction::create([
+                    'type' => FinanceTransaction::TYPE_EXPENSE,
+                    'category_id' => $oilCategory->id,
+                    'amount' => $riderOilCost,
+                    'payment_method' => $settlement->payment_method,
+                    'transaction_date' => $settlement->collected_at->toDateString(),
+                    'description' => "Rider oil cost for {$lockedRider->name}.",
+                    'reference_type' => RiderSettlement::class,
+                    'reference_id' => $settlement->id,
+                    'rider_id' => $lockedRider->id,
+                    'created_by' => $request->user()?->id,
+                    'updated_by' => $request->user()?->id,
+                ]);
+            }
 
             AdminLog::create([
                 'action' => 'rider_delivery_fees_collected',
@@ -180,7 +221,11 @@ class RiderController extends Controller
                 'actor_id' => $request->user()?->id,
                 'metadata' => [
                     'settlement_id' => $settlement->id,
+                    'finance_transaction_id' => $financeTransaction->id,
+                    'rider_oil_transaction_id' => $riderOilTransaction?->id,
                     'amount' => $amount,
+                    'rider_oil_cost' => $riderOilCost,
+                    'payment_method' => $settlement->payment_method,
                     'cash_held_before' => $cashHeldBefore,
                     'cash_held_after' => $cashHeldAfter,
                 ],
@@ -190,12 +235,16 @@ class RiderController extends Controller
             return [
                 'rider' => $lockedRider->fresh(),
                 'settlement' => $settlement->fresh('collector'),
+                'finance_transaction' => $financeTransaction->fresh('category'),
+                'rider_oil_transaction' => $riderOilTransaction?->fresh('category'),
             ];
         });
 
         return response()->json([
             'rider' => $this->riderForResponse($result['rider']),
             'settlement' => $result['settlement'],
+            'finance_transaction' => $result['finance_transaction'],
+            'rider_oil_transaction' => $result['rider_oil_transaction'],
         ]);
     }
 

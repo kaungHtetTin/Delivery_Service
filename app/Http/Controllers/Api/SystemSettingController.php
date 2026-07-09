@@ -7,6 +7,7 @@ use App\Models\AdminLog;
 use App\Models\SystemSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class SystemSettingController extends Controller
@@ -14,9 +15,10 @@ class SystemSettingController extends Controller
     private const PUBLIC_KEYS = [
         'app_name',
         'brand_color',
-        'default_theme',
         'contact_email',
         'contact_phone',
+        'app_icon',
+        'favicon',
     ];
 
     public function publicIndex(): JsonResponse
@@ -64,6 +66,36 @@ class SystemSettingController extends Controller
         return response()->json($systemSetting->fresh());
     }
 
+    public function uploadAsset(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'key' => ['required', Rule::in(['app_icon', 'favicon'])],
+            'image' => ['required', 'file', 'mimes:jpg,jpeg,png,webp,svg,ico', 'max:2048'],
+        ]);
+
+        $setting = SystemSetting::firstOrNew(['key' => $validated['key']]);
+        $previousValue = $setting->exists ? $setting->value : null;
+        $path = $request->file('image')->store('branding', 'public');
+
+        $setting->fill([
+            'value' => Storage::disk('public')->url($path),
+            'group' => 'branding',
+            'description' => $validated['key'] === 'favicon'
+                ? 'Browser favicon image.'
+                : 'Application icon image.',
+        ]);
+        $setting->save();
+
+        $this->deletePreviousPublicAsset($previousValue);
+        $this->log($request, 'setting_asset_uploaded', $setting, [
+            'key' => $setting->key,
+            'path' => $path,
+            'previous' => $previousValue,
+        ]);
+
+        return response()->json($setting->fresh());
+    }
+
     public function destroy(Request $request, SystemSetting $systemSetting): JsonResponse
     {
         $snapshot = $systemSetting->only(['key', 'group', 'value']);
@@ -102,5 +134,18 @@ class SystemSettingController extends Controller
             'actor_id' => $request->user()?->id,
             'metadata' => $metadata,
         ]);
+    }
+
+    private function deletePreviousPublicAsset(mixed $value): void
+    {
+        if (! is_string($value) || ! str_contains($value, '/storage/branding/')) {
+            return;
+        }
+
+        $path = str($value)->after('/storage/')->toString();
+
+        if ($path !== '') {
+            Storage::disk('public')->delete($path);
+        }
     }
 }

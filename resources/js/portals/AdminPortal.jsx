@@ -3,8 +3,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { formatSettingValue, settingValueForInput } from "../api";
-import { activeStatuses, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
-import { AddressBlock, CreatorSourceBadge, formatOrderCreator, Logo, StatusBadge, ThemeControl } from "../components/shared";
+import { activeStatuses, currentMonthDateRange, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
+import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, StatusBadge } from "../components/shared";
 import { AdminReports } from "./admin/AdminReports";
 
 function todayDateInputValue() {
@@ -105,36 +105,54 @@ function buildLocalGpsAlerts(riders, orders) {
 
 export function AdminPortal({
   appName = "FlowDrop Delivery",
+  appIconUrl = "",
   orders,
+  commissionRules = [],
   riders,
   assignRider,
   collectRiderFees,
   customers = [],
+  financeCategories = [],
+  financeSummary,
+  financeTransactions = [],
+  onRefreshFinance,
+  removeCommissionRule,
+  removeFinanceCategory,
+  removeFinanceTransaction,
   removeOrder,
   removeRider,
   removeSetting,
   removeUser,
   reportData,
+  saveFinanceCategory,
+  saveCommissionRule,
+  saveFinanceTransaction,
   saveOrder,
   saveProfile,
   saveRider,
   saveSetting,
+  uploadSettingImage,
   saveUser,
   selectedOrderId,
   setSelectedOrderId,
   settings = [],
   shops = [],
-  themeProps,
   onLogout,
+  onThemeChange,
+  theme = "light",
   user,
   users = [],
 }) {
   const today = useMemo(() => todayDateInputValue(), []);
   const [page, setPage] = useStoredState("flowdrop.admin.page", "dashboard");
+  const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [assignmentOrder, setAssignmentOrder] = useState(null);
   const [orderEditor, setOrderEditor] = useState(null);
   const [riderEditor, setRiderEditor] = useState(null);
   const [settlementRider, setSettlementRider] = useState(null);
+  const [commissionRuleEditor, setCommissionRuleEditor] = useState(null);
+  const [financeCategoryEditor, setFinanceCategoryEditor] = useState(null);
+  const [financeTransactionEditor, setFinanceTransactionEditor] = useState(null);
   const [userEditor, setUserEditor] = useState(null);
   const [settingEditor, setSettingEditor] = useState(null);
   const [orderFilters, setOrderFilters] = useState({
@@ -237,6 +255,7 @@ export function AdminPortal({
     {
       label: "Insights",
       items: [
+        ["finance", "wallet", "Finance"],
         ["reports", "chart", "Reports"],
         ["settings", "settings", "Settings"],
       ],
@@ -248,12 +267,14 @@ export function AdminPortal({
       ],
     },
   ];
-  const pageLabel = navGroups.flatMap((group) => group.items).find(([value]) => value === activePage)?.[2];
+  const pageLabel = activePage === "rider-detail"
+    ? "Rider detail"
+    : navGroups.flatMap((group) => group.items).find(([value]) => value === activePage)?.[2];
 
   return (
     <div className="admin-app">
       <aside className="admin-sidebar glass">
-        <Logo appName={appName} />
+        <Logo appIconUrl={appIconUrl} appName={appName} />
         <nav>
           {navGroups.map((group) => (
             <div className="nav-group" key={group.label}>
@@ -282,7 +303,7 @@ export function AdminPortal({
           </div>
           <div className="topbar-actions">
             <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
-            <ThemeControl {...themeProps} />
+            <DayNightToggle onChange={onThemeChange} theme={theme} />
             <button aria-label={`${incompleteOrderCount} unfinished orders`} className="icon-btn notification-btn" onClick={() => setPage("orders")} type="button">
               <Icon name="bell" />
               {incompleteOrderCount > 0 && <span>{incompleteOrderCount > 99 ? "99+" : incompleteOrderCount}</span>}
@@ -339,14 +360,47 @@ export function AdminPortal({
               </div>
             </section>
           )}
-          {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} pagination={ridersPagination} riders={ridersPagination.items} />}
+          {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} onView={(rider) => { setSelectedRiderId(rider.id); setPage("rider-detail"); }} pagination={ridersPagination} riders={ridersPagination.items} />}
+          {activePage === "rider-detail" && (
+            <RiderDetailPage
+              onBack={() => setPage("riders")}
+              onCollect={setSettlementRider}
+              onEdit={(rider) => setRiderEditor(rider)}
+              onOpenOrder={setSelectedOrderId}
+              orders={currentOperationOrders}
+              rider={riders.find((item) => item.id === selectedRiderId) || riders[0]}
+            />
+          )}
           {activePage === "collections" && <RiderCollectionsAdmin filters={collectionFilters} onCollect={setSettlementRider} onFilterChange={setCollectionFilters} pagination={collectionsPagination} riders={collectionsPagination.items} totalCashHeld={totalCashHeld} />}
+          {activePage === "finance" && (
+            <FinanceAdmin
+              categories={financeCategories}
+              customers={customers}
+              onCollect={setSettlementRider}
+              commissionRules={commissionRules}
+              onDeleteCategory={removeFinanceCategory}
+              onDeleteCommissionRule={removeCommissionRule}
+              onDeleteTransaction={removeFinanceTransaction}
+              onEditCategory={setFinanceCategoryEditor}
+              onEditCommissionRule={setCommissionRuleEditor}
+              onEditTransaction={setFinanceTransactionEditor}
+              onNewCategory={() => setFinanceCategoryEditor({ type: "expense", isActive: true })}
+              onNewCommissionRule={() => setCommissionRuleEditor({ type: "percentage", isActive: true, fixedAmount: 0, percentage: 0 })}
+              onNewTransaction={() => setFinanceTransactionEditor({ type: "expense", paymentMethod: "cash", transactionDate: today })}
+              onRefresh={onRefreshFinance}
+              orders={orders}
+              riders={riders}
+              summary={financeSummary}
+              transactions={financeTransactions}
+              users={users}
+            />
+          )}
           {activePage === "users" && <UsersAdmin onDelete={removeUser} onEdit={(user) => setUserEditor(user)} onNew={() => setUserEditor({})} pagination={usersPagination} users={usersPagination.items} />}
-          {activePage === "settings" && <SettingsAdmin onDelete={removeSetting} onEdit={(setting) => setSettingEditor(setting)} onNew={() => setSettingEditor({})} settings={settings} />}
+          {activePage === "settings" && <SettingsAdmin onDelete={removeSetting} onEdit={(setting) => setSettingEditor(setting)} onNew={() => setSettingEditor({})} onSaveSetting={saveSetting} onUploadAsset={uploadSettingImage} settings={settings} />}
           {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
           {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
-          {!["dashboard", "orders", "riders", "collections", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
+          {!["dashboard", "orders", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
         </div>
       </main>
       {selectedOrder && (
@@ -392,6 +446,33 @@ export function AdminPortal({
           close={() => setSettlementRider(null)}
           onSave={(settlement) => collectRiderFees(settlementRider, settlement).then(() => setSettlementRider(null))}
           rider={settlementRider}
+        />
+      )}
+      {financeCategoryEditor && (
+        <FinanceCategoryModal
+          category={financeCategoryEditor}
+          close={() => setFinanceCategoryEditor(null)}
+          onSave={(category) => saveFinanceCategory(category).then(() => setFinanceCategoryEditor(null))}
+        />
+      )}
+      {commissionRuleEditor && (
+        <CommissionRuleModal
+          close={() => setCommissionRuleEditor(null)}
+          onSave={(rule) => saveCommissionRule(rule).then(() => setCommissionRuleEditor(null))}
+          riders={riders}
+          rule={commissionRuleEditor}
+        />
+      )}
+      {financeTransactionEditor && (
+        <FinanceTransactionModal
+          categories={financeCategories}
+          close={() => setFinanceTransactionEditor(null)}
+          customers={customers}
+          onSave={(transaction) => saveFinanceTransaction(transaction).then(() => setFinanceTransactionEditor(null))}
+          orders={orders}
+          riders={riders}
+          transaction={financeTransactionEditor}
+          users={users}
         />
       )}
       {userEditor && <UserEditorModal close={() => setUserEditor(null)} onSave={(user) => saveUser(user).then(() => setUserEditor(null))} user={userEditor} />}
@@ -518,6 +599,26 @@ function exportOrdersCsv(orders) {
   link.download = `flowdrop-orders-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function financeApiFilters(filters) {
+  return {
+    type: filters.type,
+    category_id: filters.categoryId,
+    date_from: filters.dateFrom,
+    date_to: filters.dateTo,
+  };
+}
+
+function defaultFinanceFilters() {
+  const range = currentMonthDateRange();
+
+  return {
+    type: "all",
+    categoryId: "all",
+    dateFrom: range.date_from,
+    dateTo: range.date_to,
+  };
 }
 
 function usePagination(items, resetKey, initialPageSize = 10) {
@@ -731,7 +832,7 @@ function RiderSummary({ riders }) {
   return <div className="rider-summary">{riders.slice(0, 4).map((rider) => <div key={rider.id}><span className="avatar">{rider.initials}</span><p><strong>{rider.name}</strong><small>{rider.area} - {rider.lastSeen}</small></p><StatusBadge status={rider.status} /></div>)}</div>;
 }
 
-function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, pagination, riders }) {
+function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, onView, pagination, riders }) {
   const update = (key, value) => onFilterChange({ ...filters, [key]: value });
 
   return (
@@ -757,6 +858,7 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, paginat
             <td>{rider.lastSeen}</td>
             <td>
               <div className="inline-actions">
+                <button className="icon-btn small" onClick={() => onView(rider)} title="View rider detail" type="button"><Icon name="mapPin" size={15} /></button>
                 <button className="icon-btn small" onClick={() => onEdit(rider)} title="Edit rider" type="button"><Icon name="settings" size={15} /></button>
                 <button
                   className="icon-btn small danger"
@@ -773,6 +875,178 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, paginat
       </tbody></table></div>
       <TablePagination label="riders" pagination={pagination} />
     </section>
+  );
+}
+
+function RiderDetailPage({ onBack, onCollect, onEdit, onOpenOrder, orders, rider }) {
+  if (!rider) {
+    return (
+      <section className="panel placeholder admin-placeholder glass">
+        <span><Icon name="bike" size={23} /></span>
+        <h2>No rider selected</h2>
+        <button className="btn secondary" onClick={onBack} type="button">Back to riders</button>
+      </section>
+    );
+  }
+
+  const assignedOrders = orders.filter((order) => (
+    order.riderId === rider.id || String(order.riderApiId || "") === String(rider._apiId || "")
+  ));
+  const location = rider.currentLocation;
+  const freshness = locationFreshness(rider);
+
+  return (
+    <section className="rider-detail-page">
+      <div className="panel glass">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">RIDER DETAIL</p>
+            <h2>{rider.name}</h2>
+          </div>
+          <div className="row-actions">
+            <button className="btn secondary" onClick={onBack} type="button"><Icon name="chevronLeft" size={15} /> Back</button>
+            <button className="btn secondary" onClick={() => onEdit(rider)} type="button"><Icon name="settings" size={15} /> Edit</button>
+            <button className="btn primary" disabled={Number(rider.cashHeld || 0) <= 0} onClick={() => onCollect(rider)} type="button"><Icon name="wallet" size={15} /> Collect</button>
+          </div>
+        </div>
+        <div className="rider-detail-hero">
+          <span className="avatar large">{rider.initials}</span>
+          <div>
+            <strong>{rider.name}</strong>
+            <small>{rider.phone || "No phone"} · {rider.vehicle || "Vehicle unavailable"}</small>
+          </div>
+          <StatusBadge status={rider.status} />
+        </div>
+      </div>
+
+      <section className="metrics-grid">
+        <article className="metric-card glass"><span><Icon name="box" size={17} /></span><small>Active orders</small><strong>{assignedOrders.length}</strong><p>Current operation orders</p></article>
+        <article className="metric-card glass"><span><Icon name="wallet" size={17} /></span><small>Cash held</small><strong>{money(rider.cashHeld)}</strong><p>Pending office settlement</p></article>
+        <article className="metric-card glass"><span><Icon name="location" size={17} /></span><small>GPS status</small><strong>{freshness.replaceAll("_", " ")}</strong><p>{locationAgeLabel(location?.recordedAt)}</p></article>
+        <article className="metric-card glass"><span><Icon name="navigation" size={17} /></span><small>Area</small><strong>{rider.area}</strong><p>{location?.speed ? `${Math.round(location.speed)} speed` : "Latest operating area"}</p></article>
+      </section>
+
+      <section className="rider-detail-grid">
+        <div className="panel glass rider-detail-map-panel">
+          <PanelHeading title="Current position" eyebrow="LIVE MAP" />
+          <RiderDetailMap rider={rider} />
+        </div>
+        <div className="panel glass">
+          <PanelHeading title="Live information" eyebrow="GPS & OPERATIONS" />
+          <div className="detail-list">
+            <div className="detail-row"><span>Last GPS update</span><strong>{locationAgeLabel(location?.recordedAt)}</strong></div>
+            <div className="detail-row"><span>Recorded at</span><strong>{location?.recordedAtLabel || "No GPS update"}</strong></div>
+            <div className="detail-row"><span>Accuracy</span><strong>{location?.accuracy ? `${Math.round(location.accuracy)}m` : "Unknown"}</strong></div>
+            <div className="detail-row"><span>Battery</span><strong>{location?.batteryPercent ?? "Unknown"}</strong></div>
+            <div className="detail-row"><span>Coordinates</span><strong>{location ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}` : "Unavailable"}</strong></div>
+            <div className="detail-row"><span>Email</span><strong>{rider.email || "No email"}</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <div className="panel glass">
+        <PanelHeading title="Current operation orders" eyebrow="ASSIGNED WORK" />
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Order</th><th>Pickup</th><th>Receiver</th><th>Status</th><th>Fee</th></tr></thead>
+            <tbody>
+              {assignedOrders.map((order) => (
+                <tr key={order.id} onClick={() => onOpenOrder(order.id)}>
+                  <td><strong>{order.id}</strong><small>{order.createdAt}</small></td>
+                  <td><strong>{order.pickupContact}</strong><small>{order.pickup}</small></td>
+                  <td><strong>{order.receiver}</strong><small>{order.destination}</small></td>
+                  <td><StatusBadge status={order.status} /></td>
+                  <td>{formatDeliveryFeeLabel(order)}</td>
+                </tr>
+              ))}
+              {assignedOrders.length === 0 && (
+                <tr><td colSpan="5"><span className="muted">No current operation orders assigned to this rider.</span></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RiderDetailMap({ rider }) {
+  const mapNodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerLayerRef = useRef(null);
+  const location = rider.currentLocation;
+  const hasLocation = Number.isFinite(location?.latitude) && Number.isFinite(location?.longitude);
+
+  useEffect(() => {
+    if (!mapNodeRef.current || mapRef.current) {
+      return undefined;
+    }
+
+    const map = L.map(mapNodeRef.current, {
+      attributionControl: true,
+      zoomControl: true,
+    }).setView([16.8409, 96.1735], 12);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    markerLayerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    window.setTimeout(() => map.invalidateSize(), 0);
+
+    return () => {
+      map.remove();
+      markerLayerRef.current = null;
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const markerLayer = markerLayerRef.current;
+
+    if (!map || !markerLayer) {
+      return;
+    }
+
+    markerLayer.clearLayers();
+
+    if (hasLocation) {
+      const freshness = locationFreshness(rider);
+      const point = [location.latitude, location.longitude];
+      const marker = L.marker(point, {
+        icon: L.divIcon({
+          className: `rider-map-marker ${freshness} selected`,
+          html: `<span>${rider.initials}</span>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+        }),
+      });
+
+      marker.bindTooltip(`${rider.name} - ${locationAgeLabel(location.recordedAt)}`, {
+        direction: "top",
+        offset: [0, -14],
+        opacity: 0.94,
+      });
+      marker.addTo(markerLayer);
+      map.setView(point, 16);
+    }
+
+    window.setTimeout(() => map.invalidateSize(), 0);
+  }, [hasLocation, location?.latitude, location?.longitude, location?.recordedAt, rider]);
+
+  return (
+    <div className="rider-detail-map">
+      <div className="admin-map-canvas" ref={mapNodeRef} />
+      {!hasLocation && <p className="map-empty">No current GPS location for this rider.</p>}
+      <div className="map-legend">
+        <span><i className="fresh" /> Fresh</span>
+        <span><i className="warning" /> 31-120s</span>
+        <span><i className="stale" /> Stale</span>
+      </div>
+    </div>
   );
 }
 
@@ -815,6 +1089,327 @@ function RiderCollectionsAdmin({ filters, onCollect, onFilterChange, pagination,
       </tbody></table></div>
       <TablePagination label="riders" pagination={pagination} />
     </section>
+  );
+}
+
+function FinanceAdmin({ categories, commissionRules, customers, onCollect, onDeleteCategory, onDeleteCommissionRule, onDeleteTransaction, onEditCategory, onEditCommissionRule, onEditTransaction, onNewCategory, onNewCommissionRule, onNewTransaction, onRefresh, orders, riders, summary, transactions, users }) {
+  const [tab, setTab] = useState("overview");
+  const [filters, setFilters] = useState(defaultFinanceFilters);
+  const filteredTransactions = useMemo(
+    () => transactions.filter((transaction) => (
+      (filters.type === "all" || transaction.type === filters.type) &&
+      (filters.categoryId === "all" || String(transaction.categoryId) === String(filters.categoryId)) &&
+      (!filters.dateFrom || transaction.transactionDate >= filters.dateFrom) &&
+      (!filters.dateTo || transaction.transactionDate <= filters.dateTo)
+    )),
+    [filters, transactions],
+  );
+  const pagination = usePagination(
+    filteredTransactions,
+    `finance:${filters.type}|${filters.categoryId}|${filters.dateFrom}|${filters.dateTo}`,
+  );
+  const financeTrendRows = useMemo(() => buildFinanceTrendRows(filteredTransactions), [filteredTransactions]);
+  const totalIncome = summary?.totals?.income ?? transactions.filter((item) => item.type === "income").reduce((total, item) => total + Number(item.amount || 0), 0);
+  const totalExpense = summary?.totals?.expense ?? transactions.filter((item) => item.type === "expense").reduce((total, item) => total + Number(item.amount || 0), 0);
+  const totalCashHeld = riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0);
+  const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+  const resetFilters = () => {
+    const nextFilters = defaultFinanceFilters();
+    setFilters(nextFilters);
+    onRefresh?.(financeApiFilters(nextFilters));
+  };
+  const refreshWithFilters = () => onRefresh?.(financeApiFilters(filters));
+
+  return (
+    <section className="reports-layout finance-page">
+      <div className="finance-tabs">
+        {[
+          ["overview", "Overview"],
+          ["transactions", "Transactions"],
+          ["categories", "Categories"],
+          ["commissions", "Commissions"],
+        ].map(([value, label]) => (
+          <button className={tab === value ? "active" : ""} key={value} onClick={() => setTab(value)} type="button">{label}</button>
+        ))}
+      </div>
+      <div className="panel glass finance-filter-panel">
+        <PanelHeading title="Finance filters" eyebrow="REPORT FILTERS" />
+        <div className="filter-toolbar finance-report-filters">
+          <select onChange={(event) => update("type", event.target.value)} value={filters.type}>
+            <option value="all">All types</option>
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+          </select>
+          <select onChange={(event) => update("categoryId", event.target.value)} value={filters.categoryId}>
+            <option value="all">All categories</option>
+            {categories.map((category) => <option key={category.id} value={category._apiId}>{category.name}</option>)}
+          </select>
+          <input aria-label="Finance date from" onChange={(event) => update("dateFrom", event.target.value)} type="date" value={filters.dateFrom} />
+          <input aria-label="Finance date to" onChange={(event) => update("dateTo", event.target.value)} type="date" value={filters.dateTo} />
+          <button className="btn primary" onClick={refreshWithFilters} type="button"><Icon name="filter" size={15} /> Apply</button>
+          <button className="btn secondary" onClick={resetFilters} type="button">Reset</button>
+        </div>
+      </div>
+
+      {tab === "overview" && (
+        <>
+          <section className="metrics-grid">
+            <article className="metric-card glass"><span><Icon name="wallet" size={17} /></span><small>Total income</small><strong>{money(totalIncome)}</strong><p>Recognized when rider cash is settled</p></article>
+            <article className="metric-card glass"><span><Icon name="card" size={17} /></span><small>Total expenses</small><strong>{money(totalExpense)}</strong><p>Manual office expense records</p></article>
+            <article className="metric-card glass"><span><Icon name="chart" size={17} /></span><small>Net result</small><strong>{money(totalIncome - totalExpense)}</strong><p>Income minus expenses</p></article>
+            <article className="metric-card glass"><span><Icon name="bike" size={17} /></span><small>Rider cash held</small><strong>{money(totalCashHeld)}</strong><p>Not yet company income</p></article>
+          </section>
+          <section className="finance-overview-grid">
+            <FinanceTrendChart rows={financeTrendRows} />
+            <div className="panel glass">
+              <PanelHeading title="Rider cash pending" eyebrow="SETTLEMENTS" />
+              <FinanceRiderCashList onCollect={onCollect} riders={riders} />
+            </div>
+          </section>
+        </>
+      )}
+
+      {tab === "transactions" && (
+        <div className="panel glass">
+          <div className="panel-heading">
+            <div><p className="eyebrow">TRANSACTIONS</p><h2>Income and expenses</h2></div>
+            <div className="row-actions">
+              <button className="btn primary" onClick={onNewTransaction} type="button"><Icon name="plus" size={15} /> Add transaction</button>
+            </div>
+          </div>
+          <FinanceTransactionTable onDelete={onDeleteTransaction} onEdit={onEditTransaction} transactions={pagination.items} />
+          <TablePagination label="transactions" pagination={pagination} />
+        </div>
+      )}
+
+      {tab === "categories" && (
+        <div className="panel glass">
+          <PanelHeading title="Finance categories" eyebrow="CATEGORY SETUP" action="Add category" onAction={onNewCategory} />
+          <FinanceCategoryTable categories={categories} onDelete={onDeleteCategory} onEdit={onEditCategory} />
+        </div>
+      )}
+
+      {tab === "commissions" && (
+        <div className="panel glass">
+          <PanelHeading title="Commission rules" eyebrow="RIDER COMMISSION" action="Add rule" onAction={onNewCommissionRule} />
+          <CommissionRuleTable onDelete={onDeleteCommissionRule} onEdit={onEditCommissionRule} rules={commissionRules} />
+        </div>
+      )}
+
+    </section>
+  );
+}
+
+function buildFinanceTrendRows(transactions) {
+  const grouped = new Map();
+
+  transactions.forEach((transaction) => {
+    const date = transaction.transactionDate || "No date";
+    const current = grouped.get(date) || {
+      date,
+      income: 0,
+      expense: 0,
+      net: 0,
+    };
+    const amount = Number(transaction.amount || 0);
+
+    if (transaction.type === "income") {
+      current.income += amount;
+    } else if (transaction.type === "expense") {
+      current.expense += amount;
+    }
+
+    current.net = current.income - current.expense;
+    grouped.set(date, current);
+  });
+
+  return Array.from(grouped.values())
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)));
+}
+
+function FinanceTrendChart({ rows }) {
+  const width = 760;
+  const height = 260;
+  const padding = { top: 20, right: 22, bottom: 34, left: 54 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const values = rows.flatMap((row) => [row.income, row.expense, row.net]);
+  const maxValue = Math.max(0, ...values);
+  const minValue = Math.min(0, ...values);
+  const range = maxValue - minValue || 1;
+  const xFor = (index) => padding.left + (rows.length <= 1 ? plotWidth / 2 : (index / (rows.length - 1)) * plotWidth);
+  const yFor = (value) => padding.top + ((maxValue - value) / range) * plotHeight;
+  const pathFor = (key) => rows
+    .map((row, index) => `${index === 0 ? "M" : "L"} ${xFor(index).toFixed(2)} ${yFor(row[key]).toFixed(2)}`)
+    .join(" ");
+  const zeroY = yFor(0);
+  const firstLabel = rows[0]?.date ? shortDateLabel(rows[0].date) : "";
+  const lastLabel = rows.at(-1)?.date ? shortDateLabel(rows.at(-1).date) : "";
+  const series = [
+    ["income", "Income", "#087f74"],
+    ["expense", "Expense", "#c53f3f"],
+    ["net", "Net", "#2874bc"],
+  ];
+
+  return (
+    <div className="panel glass finance-chart-panel">
+      <PanelHeading title="Finance trend" eyebrow="OVERVIEW REPORT" />
+      {rows.length === 0 ? (
+        <p className="muted">No finance data in the selected range.</p>
+      ) : (
+        <>
+          <div className="finance-chart-legend">
+            {series.map(([key, label, color]) => (
+              <span key={key}><i style={{ background: color }} />{label}</span>
+            ))}
+          </div>
+          <div className="finance-line-chart">
+            <svg aria-label="Finance income expense and net line chart" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
+              <line className="chart-grid-line" x1={padding.left} x2={width - padding.right} y1={padding.top} y2={padding.top} />
+              <line className="chart-grid-line" x1={padding.left} x2={width - padding.right} y1={zeroY} y2={zeroY} />
+              <line className="chart-grid-line" x1={padding.left} x2={width - padding.right} y1={height - padding.bottom} y2={height - padding.bottom} />
+              <text className="chart-axis-label" x={padding.left - 10} y={padding.top + 4} textAnchor="end">{compactMoney(maxValue)}</text>
+              <text className="chart-axis-label" x={padding.left - 10} y={zeroY + 4} textAnchor="end">{compactMoney(0)}</text>
+              <text className="chart-axis-label" x={padding.left - 10} y={height - padding.bottom + 4} textAnchor="end">{compactMoney(minValue)}</text>
+              <text className="chart-axis-label" x={padding.left} y={height - 9}>{firstLabel}</text>
+              <text className="chart-axis-label" x={width - padding.right} y={height - 9} textAnchor="end">{lastLabel}</text>
+              {series.map(([key, , color]) => (
+                <path className="finance-chart-line" d={pathFor(key)} key={key} stroke={color} />
+              ))}
+              {rows.map((row, index) => (
+                <g key={row.date}>
+                  {series.map(([key, , color]) => (
+                    <circle className="finance-chart-point" cx={xFor(index)} cy={yFor(row[key])} fill={color} key={key} r="3.4" />
+                  ))}
+                </g>
+              ))}
+            </svg>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function shortDateLabel(value) {
+  if (!value || value === "No date") {
+    return value || "";
+  }
+
+  const date = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function compactMoney(value) {
+  const amount = Number(value || 0);
+
+  if (Math.abs(amount) >= 1000) {
+    return `${Math.round(amount / 1000)}k`;
+  }
+
+  return String(Math.round(amount));
+}
+
+function FinanceTransactionTable({ onDelete, onEdit, transactions }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Reference</th><th>Method</th><th>Amount</th><th /></tr></thead>
+        <tbody>
+          {transactions.map((transaction) => (
+            <tr key={transaction.id}>
+              <td><strong>{transaction.transactionDate || "No date"}</strong><small>{transaction.createdAt}</small></td>
+              <td><StatusBadge status={transaction.type} /></td>
+              <td><strong>{transaction.categoryName || "Uncategorized"}</strong><small>{transaction.description || "No description"}</small></td>
+              <td><strong>{transaction.riderName || transaction.orderCode || transaction.customerName || transaction.clientName || "Manual"}</strong><small>{transaction.orderCode || transaction.referenceType || ""}</small></td>
+              <td>{transaction.paymentMethod.replaceAll("_", " ")}</td>
+              <td><strong>{money(transaction.amount)}</strong></td>
+              <td><CrudActions label={transaction.id} onDelete={() => onDelete(transaction.id)} onEdit={() => onEdit(transaction)} /></td>
+            </tr>
+          ))}
+          {transactions.length === 0 && (
+            <tr><td colSpan="7"><span className="muted">No finance transactions match this view.</span></td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FinanceCategoryTable({ categories, onDelete, onEdit }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Description</th><th /></tr></thead>
+        <tbody>
+          {categories.map((category) => (
+            <tr key={category.id}>
+              <td><strong>{category.name}</strong></td>
+              <td><StatusBadge status={category.type} /></td>
+              <td><StatusBadge status={category.isActive ? "active" : "inactive"} /></td>
+              <td>{category.description || <span className="muted">No description</span>}</td>
+              <td><CrudActions label={category.name} onDelete={() => onDelete(category.id)} onEdit={() => onEdit(category)} /></td>
+            </tr>
+          ))}
+          {categories.length === 0 && (
+            <tr><td colSpan="5"><span className="muted">No finance categories yet.</span></td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CommissionRuleTable({ onDelete, onEdit, rules }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Scope</th><th>Type</th><th>Fixed</th><th>Percent</th><th>Status</th><th /></tr></thead>
+        <tbody>
+          {rules.map((rule) => (
+            <tr key={rule.id}>
+              <td><strong>{rule.name}</strong></td>
+              <td>{rule.riderName || "All riders"}</td>
+              <td><StatusBadge status={rule.type} /></td>
+              <td>{money(rule.fixedAmount)}</td>
+              <td>{Number(rule.percentage || 0)}%</td>
+              <td><StatusBadge status={rule.isActive ? "active" : "inactive"} /></td>
+              <td><CrudActions label={rule.name} onDelete={() => onDelete(rule.id)} onEdit={() => onEdit(rule)} /></td>
+            </tr>
+          ))}
+          {rules.length === 0 && (
+            <tr><td colSpan="7"><span className="muted">No commission rules yet.</span></td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FinanceRiderCashList({ onCollect, riders }) {
+  const holdingRiders = riders
+    .filter((rider) => Number(rider.cashHeld || 0) > 0)
+    .sort((a, b) => Number(b.cashHeld || 0) - Number(a.cashHeld || 0))
+    .slice(0, 8);
+
+  if (!holdingRiders.length) {
+    return <p className="muted">No rider is holding delivery-fee cash right now.</p>;
+  }
+
+  return (
+    <div className="alert-list">
+      {holdingRiders.map((rider) => (
+        <button className="alert-row" key={rider.id} onClick={() => onCollect(rider)} type="button">
+          <span className="alert-icon info"><Icon name="wallet" size={15} /></span>
+          <p><strong>{rider.name}</strong><small>{money(rider.cashHeld)} pending settlement</small></p>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -897,7 +1492,7 @@ function CustomersShopsAdmin({ customers, onDeleteCustomer, onDeleteShop, onEdit
   );
 }
 
-function SettingsAdmin({ onDelete, onEdit, onNew, settings }) {
+function SettingsAdmin({ onDelete, onEdit, onNew, onSaveSetting, onUploadAsset, settings }) {
   const [filters, setFilters] = useState({ search: "", group: "all" });
   const groups = useMemo(
     () => [...new Set(settings.map((setting) => setting.group || "general"))].sort(),
@@ -917,46 +1512,153 @@ function SettingsAdmin({ onDelete, onEdit, onNew, settings }) {
   const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
 
   return (
-    <section className="panel glass">
-      <div className="panel-heading">
-        <div><p className="eyebrow">SYSTEM CONFIGURATION</p><h2>Settings</h2></div>
-        <button className="btn primary" onClick={onNew} type="button"><Icon name="plus" size={16} /> Add setting</button>
-      </div>
-      <div className="filter-toolbar compact">
-        <div className="search-box"><Icon name="search" size={16} /><input onChange={(event) => update("search", event.target.value)} placeholder="Search key, value, group..." value={filters.search} /></div>
-        <select onChange={(event) => update("group", event.target.value)} value={filters.group}>
-          <option value="all">All groups</option>
-          {groups.map((group) => <option key={group} value={group}>{group}</option>)}
-        </select>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead><tr><th>Key</th><th>Value</th><th>Group</th><th>Description</th><th /></tr></thead>
-          <tbody>
-            {filteredSettings.map((setting) => (
-              <tr key={setting._apiId || setting.key}>
-                <td><strong>{setting.key}</strong></td>
-                <td>{formatSettingValue(setting.value)}</td>
-                <td>{setting.group}</td>
-                <td>{setting.description || <span className="muted">No description</span>}</td>
-                <td><CrudActions label={setting.key} onDelete={() => onDelete(setting.id)} onEdit={() => onEdit(setting)} /></td>
-              </tr>
-            ))}
-            {filteredSettings.length === 0 && (
-              <tr>
-                <td colSpan="5">
-                  <span className="muted">
-                    {settings.length === 0
-                      ? "No settings yet. Use Add setting to create app configuration values."
-                      : "No settings match the current search or group filter."}
-                  </span>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+    <section className="reports-layout">
+      <SettingBrandIdentity onSave={onSaveSetting} onUpload={onUploadAsset} settings={settings} />
+      <div className="panel glass">
+        <div className="panel-heading">
+          <div><p className="eyebrow">SYSTEM CONFIGURATION</p><h2>Settings</h2></div>
+          <button className="btn primary" onClick={onNew} type="button"><Icon name="plus" size={16} /> Add setting</button>
+        </div>
+        <div className="filter-toolbar compact">
+          <div className="search-box"><Icon name="search" size={16} /><input onChange={(event) => update("search", event.target.value)} placeholder="Search key, value, group..." value={filters.search} /></div>
+          <select onChange={(event) => update("group", event.target.value)} value={filters.group}>
+            <option value="all">All groups</option>
+            {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+          </select>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Key</th><th>Value</th><th>Group</th><th>Description</th><th /></tr></thead>
+            <tbody>
+              {filteredSettings.map((setting) => (
+                <tr key={setting._apiId || setting.key}>
+                  <td><strong>{setting.key}</strong></td>
+                  <td>{formatSettingValue(setting.value)}</td>
+                  <td>{setting.group}</td>
+                  <td>{setting.description || <span className="muted">No description</span>}</td>
+                  <td><CrudActions label={setting.key} onDelete={() => onDelete(setting.id)} onEdit={() => onEdit(setting)} /></td>
+                </tr>
+              ))}
+              {filteredSettings.length === 0 && (
+                <tr>
+                  <td colSpan="5">
+                    <span className="muted">
+                      {settings.length === 0
+                        ? "No settings yet. Use Add setting to create app configuration values."
+                        : "No settings match the current search or group filter."}
+                    </span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
+  );
+}
+
+function SettingBrandIdentity({ onSave, onUpload, settings }) {
+  const [saving, setSaving] = useState("");
+  const [uploading, setUploading] = useState("");
+  const [error, setError] = useState("");
+  const settingFor = (key) => settings.find((setting) => setting.key === key);
+  const valueFor = (key) => settingFor(key)?.value || "";
+  const brandColor = settingFor("brand_color")?.value || "#087f74";
+  const saveValue = async (key, value) => {
+    const existing = settingFor(key);
+    const descriptions = {
+      brand_color: "Default primary UI color.",
+    };
+
+    setSaving(key);
+    setError("");
+
+    try {
+      await onSave?.({
+        _apiId: existing?._apiId,
+        id: existing?.id || key,
+        key,
+        value,
+        group: "branding",
+        description: existing?.description || descriptions[key],
+      });
+    } catch (saveError) {
+      setError(
+        saveError?.payload?.message ||
+        Object.values(saveError?.payload?.errors || {})?.[0]?.[0] ||
+        saveError?.message ||
+        "Could not save branding setting.",
+      );
+    } finally {
+      setSaving("");
+    }
+  };
+  const upload = async (key, file) => {
+    if (!file) {
+      return;
+    }
+
+    setUploading(key);
+    setError("");
+
+    try {
+      await onUpload?.(key, file);
+    } catch (uploadError) {
+      setError(
+        uploadError?.payload?.message ||
+        Object.values(uploadError?.payload?.errors || {})?.[0]?.[0] ||
+        uploadError?.message ||
+        "Could not upload image.",
+      );
+    } finally {
+      setUploading("");
+    }
+  };
+
+  return (
+    <div className="panel glass setting-brand-panel">
+      <PanelHeading title="Brand identity" eyebrow="OFFICE BRANDING" />
+      <div className="setting-brand-grid">
+        <div className="setting-brand-color glass" style={{ "--brand-preview-color": brandColor }}>
+          <div className="brand-color-label">
+            <span>Theme color</span>
+            <small>Client and rider apps</small>
+          </div>
+          <label className="brand-color-picker-shell">
+            <input aria-label="Theme color picker" disabled={saving === "brand_color"} onChange={(event) => saveValue("brand_color", event.target.value)} type="color" value={brandColor} />
+            <span className="brand-color-preview" />
+            <span className="brand-color-copy">
+              <strong>{brandColor}</strong>
+              <small>{saving === "brand_color" ? "Saving..." : "Click to change"}</small>
+            </span>
+          </label>
+        </div>
+        <div className="setting-assets-grid">
+          {[
+            ["app_icon", "Application icon", "Shown in app headers"],
+            ["favicon", "Favicon", "Shown in the browser tab"],
+          ].map(([key, label, note]) => {
+            const value = valueFor(key);
+
+            return (
+              <label className="setting-asset-upload glass" key={key}>
+                <span className="setting-asset-preview">
+                  {value ? <img alt="" src={value} /> : <Icon name={key === "favicon" ? "navigation" : "upload"} size={18} />}
+                </span>
+                <span>
+                  <strong>{label}</strong>
+                  <small>{uploading === key ? "Uploading..." : note}</small>
+                </span>
+                <input accept=".ico,.jpg,.jpeg,.png,.svg,.webp,image/*" disabled={Boolean(uploading)} onChange={(event) => upload(key, event.target.files?.[0] || null)} type="file" />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+      {saving && <p className="profile-success">Saving {saving.replaceAll("_", " ")}...</p>}
+      {error && <p className="auth-error">{error}</p>}
+    </div>
   );
 }
 
@@ -1406,6 +2108,8 @@ function RiderEditorModal({ close, onSave, rider }) {
 function RiderSettlementModal({ close, onSave, rider }) {
   const [form, setForm] = useState({
     amount: rider.cashHeld || 0,
+    riderOilCost: "",
+    paymentMethod: "cash",
     note: "",
   });
   const [submitting, setSubmitting] = useState(false);
@@ -1449,6 +2153,8 @@ function RiderSettlementModal({ close, onSave, rider }) {
         </div>
         <div className="crud-grid">
           <CrudField inputMode="numeric" label="Amount collected" onChange={(value) => update("amount", value)} required value={form.amount} />
+          <CrudField inputMode="numeric" label="Rider oil cost" onChange={(value) => update("riderOilCost", value)} value={form.riderOilCost} />
+          <CrudSelect label="Payment method" onChange={(value) => update("paymentMethod", value)} options={[["cash", "Cash"], ["mobile_banking", "Mobile banking"], ["bank_transfer", "Bank transfer"], ["other", "Other"]]} value={form.paymentMethod} />
           <CrudField className="span-2" label="Settlement note" onChange={(value) => update("note", value)} value={form.note} />
           {error && <p className="auth-error span-2">{error}</p>}
         </div>
@@ -1460,6 +2166,93 @@ function RiderSettlementModal({ close, onSave, rider }) {
         </div>
       </form>
     </div>
+  );
+}
+
+function FinanceCategoryModal({ category, close, onSave }) {
+  const [form, setForm] = useState({
+    _apiId: category._apiId,
+    id: category.id,
+    name: category.name || "",
+    type: category.type || "expense",
+    description: category.description || "",
+    isActive: category.isActive ?? true,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  return (
+    <CrudModal close={close} eyebrow="FINANCE CATEGORY" onSave={onSave} setSubmitting={setSubmitting} submitting={submitting} title={form._apiId ? `Edit ${form.name}` : "Add category"} value={form}>
+      <CrudField label="Name" onChange={(value) => update("name", value)} required value={form.name} />
+      <CrudSelect label="Type" onChange={(value) => update("type", value)} options={["income", "expense"]} value={form.type} />
+      <CrudSelect label="Status" onChange={(value) => update("isActive", value === "active")} options={[["active", "Active"], ["inactive", "Inactive"]]} value={form.isActive ? "active" : "inactive"} />
+      <CrudField className="span-2" label="Description" onChange={(value) => update("description", value)} value={form.description} />
+    </CrudModal>
+  );
+}
+
+function CommissionRuleModal({ close, onSave, riders, rule }) {
+  const [form, setForm] = useState({
+    _apiId: rule._apiId,
+    id: rule.id,
+    riderId: rule.riderId || "",
+    name: rule.name || "",
+    type: rule.type || "percentage",
+    fixedAmount: rule.fixedAmount || 0,
+    percentage: rule.percentage || 0,
+    isActive: rule.isActive ?? true,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  return (
+    <CrudModal close={close} eyebrow="COMMISSION RULE" onSave={onSave} setSubmitting={setSubmitting} submitting={submitting} title={form._apiId ? `Edit ${form.name}` : "Add commission rule"} value={form}>
+      <CrudField label="Name" onChange={(value) => update("name", value)} required value={form.name} />
+      <CrudSelect label="Rider scope" onChange={(value) => update("riderId", value)} options={[["", "All riders"], ...riders.map((rider) => [rider._apiId, rider.name])]} value={form.riderId} />
+      <CrudSelect label="Type" onChange={(value) => update("type", value)} options={[["none", "No commission"], ["fixed", "Fixed amount"], ["percentage", "Percentage"], ["fixed_plus_percentage", "Fixed plus percentage"]]} value={form.type} />
+      <CrudSelect label="Status" onChange={(value) => update("isActive", value === "active")} options={[["active", "Active"], ["inactive", "Inactive"]]} value={form.isActive ? "active" : "inactive"} />
+      <CrudField inputMode="numeric" label="Fixed amount" onChange={(value) => update("fixedAmount", value)} value={form.fixedAmount} />
+      <CrudField inputMode="numeric" label="Percentage" onChange={(value) => update("percentage", value)} value={form.percentage} />
+    </CrudModal>
+  );
+}
+
+function FinanceTransactionModal({ categories, close, customers, onSave, orders, riders, transaction, users }) {
+  const today = todayDateInputValue();
+  const [form, setForm] = useState({
+    _apiId: transaction._apiId,
+    id: transaction.id,
+    type: transaction.type || "expense",
+    categoryId: transaction.categoryId || "",
+    amount: transaction.amount || "",
+    paymentMethod: transaction.paymentMethod || "cash",
+    transactionDate: transaction.transactionDate || today,
+    description: transaction.description || "",
+    riderId: transaction.riderId || "",
+    orderApiId: transaction.orderApiId || "",
+    customerId: transaction.customerId || "",
+    clientUserId: transaction.clientUserId || "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const categoryOptions = categories
+    .filter((category) => category.type === form.type && category.isActive)
+    .map((category) => [category._apiId, category.name]);
+  const clientUsers = users.filter((user) => user.role === "client");
+
+  return (
+    <CrudModal close={close} eyebrow="FINANCE TRANSACTION" onSave={onSave} setSubmitting={setSubmitting} submitting={submitting} title={form._apiId ? `Edit ${form.id}` : "Add transaction"} value={form}>
+      <CrudSelect label="Type" onChange={(value) => update("type", value)} options={["income", "expense"]} value={form.type} />
+      <CrudSelect label="Category" onChange={(value) => update("categoryId", value)} options={[["", "Uncategorized"], ...categoryOptions]} value={form.categoryId} />
+      <CrudField inputMode="numeric" label="Amount" onChange={(value) => update("amount", value)} required value={form.amount} />
+      <CrudSelect label="Payment method" onChange={(value) => update("paymentMethod", value)} options={[["cash", "Cash"], ["mobile_banking", "Mobile banking"], ["bank_transfer", "Bank transfer"], ["other", "Other"]]} value={form.paymentMethod} />
+      <CrudField label="Transaction date" onChange={(value) => update("transactionDate", value)} required type="date" value={form.transactionDate} />
+      <CrudSelect label="Rider" onChange={(value) => update("riderId", value)} options={[["", "No rider"], ...riders.map((rider) => [rider._apiId, rider.name])]} value={form.riderId} />
+      <CrudSelect label="Order" onChange={(value) => update("orderApiId", value)} options={[["", "No order"], ...orders.slice(0, 100).map((order) => [order._apiId, order.id])]} value={form.orderApiId} />
+      <CrudSelect label="Client" onChange={(value) => update("clientUserId", value)} options={[["", "No client"], ...clientUsers.map((user) => [user._apiId, user.name])]} value={form.clientUserId} />
+      <CrudSelect label="Customer" onChange={(value) => update("customerId", value)} options={[["", "No customer"], ...customers.map((customer) => [customer._apiId, customer.name])]} value={form.customerId} />
+      <CrudField className="span-2" label="Description" onChange={(value) => update("description", value)} value={form.description} />
+    </CrudModal>
   );
 }
 
@@ -1707,14 +2500,12 @@ function SettingEditorModal({ close, onSave, setting }) {
             <input onChange={(event) => update("value", event.target.value)} required value={form.value} />
           </div>
         </label>
-      ) : form.key === "default_theme" ? (
-        <CrudSelect label="Value" onChange={(value) => update("value", value)} options={["light", "dark"]} value={form.value || "light"} />
       ) : (
         <CrudField className="span-2" label="Value" onChange={(value) => update("value", value)} required value={form.value} />
       )}
       <CrudSelect label="Group" onChange={(value) => update("group", value)} options={["general", "branding", "contact", "notifications", "operations"]} value={form.group} />
       <CrudField className="span-2" label="Description" onChange={(value) => update("description", value)} value={form.description} />
-      {["brand_color", "default_theme", "app_name"].includes(form.key) && (
+      {["brand_color", "app_name"].includes(form.key) && (
         <p className="muted span-2">This setting is applied live across all portals after save.</p>
       )}
     </CrudModal>

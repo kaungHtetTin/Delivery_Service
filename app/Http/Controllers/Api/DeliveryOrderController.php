@@ -7,8 +7,11 @@ use App\Http\Requests\StoreDeliveryOrderRequest;
 use App\Http\Requests\UpdateDeliveryOrderStatusRequest;
 use App\Models\AdminLog;
 use App\Models\CashCollection;
+use App\Models\CommissionRule;
 use App\Models\Customer;
 use App\Models\DeliveryOrder;
+use App\Models\FinanceCategory;
+use App\Models\FinanceTransaction;
 use App\Models\Rider;
 use App\Models\Shop;
 use App\Models\User;
@@ -177,8 +180,14 @@ class DeliveryOrderController extends Controller
 
         $previous = $deliveryOrder->only(array_keys($validated));
         $previousStatus = $deliveryOrder->status;
+        $previousDeliveryFee = (float) $deliveryOrder->delivery_fee;
 
-        DB::transaction(function () use ($deliveryOrder, $validated, $previous, $previousStatus, $request) {
+        DB::transaction(function () use ($deliveryOrder, $validated, $previous, $previousStatus, $previousDeliveryFee, $request) {
+            if (($validated['status'] ?? null) === 'completed' && $previousStatus !== 'completed') {
+                $validated['completed_at'] = now();
+                $validated['payment_status'] = $validated['payment_status'] ?? 'paid';
+            }
+
             $deliveryOrder->update($validated);
 
             if (array_key_exists('status', $validated) && $validated['status'] !== $previousStatus) {
@@ -202,6 +211,17 @@ class DeliveryOrderController extends Controller
                     'current' => $validated,
                 ],
             ]);
+
+            if (($validated['status'] ?? null) === 'completed') {
+                $this->deleteCompletedOrderNotifications($deliveryOrder);
+            }
+
+            $this->syncCompletedOrderFinance(
+                $deliveryOrder,
+                $previousStatus,
+                $previousDeliveryFee,
+                $request->user()?->id
+            );
         });
 
         $freshOrder = $deliveryOrder->fresh()->load(['rider.latestLocation', 'customer', 'shop', 'clientUser', 'statusHistories', 'payments', 'cashCollection']);
@@ -234,6 +254,7 @@ class DeliveryOrderController extends Controller
 
         DB::transaction(function () use ($deliveryOrder, $request, $snapshot, $rider) {
             $id = $deliveryOrder->id;
+            $this->reverseCompletedOrderFinance($deliveryOrder, $request->user()?->id);
             $deliveryOrder->delete();
 
             if ($rider) {
@@ -344,7 +365,7 @@ class DeliveryOrderController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($deliveryOrder, $validated, $status) {
+        DB::transaction(function () use ($deliveryOrder, $validated, $status, $request) {
             $existingCollection = $deliveryOrder->cashCollection;
 
             $timestamps = match ($status) {
@@ -407,6 +428,11 @@ class DeliveryOrderController extends Controller
 
             if (in_array($status, ['completed', 'failed', 'cancelled'], true) && $deliveryOrder->rider) {
                 $this->releaseRiderWhenIdle($deliveryOrder->rider, $deliveryOrder->id);
+            }
+
+            if ($status === 'completed') {
+                $this->deleteCompletedOrderNotifications($deliveryOrder);
+                $this->createOrUpdateCommissionExpense($deliveryOrder, $request->user()?->id);
             }
         });
 
@@ -537,6 +563,192 @@ class DeliveryOrderController extends Controller
         $rider->loadMissing('user');
 
         $rider->user?->notify(new OrderActivityNotification($order, $kind, $title, $body, $meta));
+    }
+
+    private function syncCompletedOrderFinance(DeliveryOrder $order, string $previousStatus, float $previousDeliveryFee, ?int $actorId): void
+    {
+        $order->refresh();
+
+        if ($order->status !== 'completed') {
+            return;
+        }
+
+        $currentFee = (float) $order->delivery_fee;
+
+        if ($previousStatus !== 'completed') {
+            $this->ensureCompletedOrderCashCollection($order, $actorId);
+        } elseif (abs($currentFee - $previousDeliveryFee) >= 0.01) {
+            $this->applyCompletedOrderFeeDelta($order, $currentFee - $previousDeliveryFee, $actorId, 'Delivery fee corrected');
+        }
+
+        $this->createOrUpdateCommissionExpense($order, $actorId);
+    }
+
+    private function ensureCompletedOrderCashCollection(DeliveryOrder $order, ?int $actorId): void
+    {
+        $deliveryFee = (float) $order->delivery_fee;
+
+        if (! $order->rider_id || $deliveryFee <= 0 || $order->cashCollection()->exists()) {
+            return;
+        }
+
+        CashCollection::create([
+            'delivery_order_id' => $order->id,
+            'rider_id' => $order->rider_id,
+            'product_cash_collected' => 0,
+            'delivery_fee_collected' => $deliveryFee,
+            'total_cash_collected' => $deliveryFee,
+        ]);
+
+        $order->rider()->increment('cash_held', $deliveryFee);
+
+        AdminLog::create([
+            'action' => 'completed_order_cash_collection_created',
+            'subject_type' => DeliveryOrder::class,
+            'subject_id' => $order->id,
+            'actor_type' => 'office_admin',
+            'actor_id' => $actorId,
+            'metadata' => [
+                'delivery_fee' => $deliveryFee,
+                'rider_id' => $order->rider_id,
+            ],
+        ]);
+    }
+
+    private function applyCompletedOrderFeeDelta(DeliveryOrder $order, float $delta, ?int $actorId, string $reason): void
+    {
+        if (! $order->rider_id || abs($delta) < 0.01) {
+            return;
+        }
+
+        if ($collection = $order->cashCollection()->first()) {
+            $nextDeliveryFee = max(0, (float) $collection->delivery_fee_collected + $delta);
+            $collection->update([
+                'delivery_fee_collected' => $nextDeliveryFee,
+                'total_cash_collected' => max(0, (float) $collection->total_cash_collected + $delta),
+            ]);
+        } elseif ($delta > 0) {
+            CashCollection::create([
+                'delivery_order_id' => $order->id,
+                'rider_id' => $order->rider_id,
+                'product_cash_collected' => 0,
+                'delivery_fee_collected' => $delta,
+                'total_cash_collected' => $delta,
+            ]);
+        }
+
+        $rider = Rider::query()->lockForUpdate()->find($order->rider_id);
+
+        if (! $rider) {
+            return;
+        }
+
+        if ($delta > 0) {
+            $rider->increment('cash_held', $delta);
+            return;
+        }
+
+        $reduction = abs($delta);
+        $cashHeld = (float) $rider->cash_held;
+        $cashReduction = min($cashHeld, $reduction);
+
+        if ($cashReduction > 0) {
+            $rider->update(['cash_held' => $cashHeld - $cashReduction]);
+        }
+
+        $settledShortfall = round($reduction - $cashReduction, 2);
+
+        if ($settledShortfall > 0) {
+            $category = FinanceCategory::financeAdjustmentExpenseCategory($actorId);
+            FinanceTransaction::create([
+                'type' => FinanceTransaction::TYPE_EXPENSE,
+                'category_id' => $category->id,
+                'amount' => $settledShortfall,
+                'payment_method' => 'cash',
+                'transaction_date' => today()->toDateString(),
+                'description' => "{$reason} for {$order->code}.",
+                'reference_type' => DeliveryOrder::class,
+                'reference_id' => $order->id,
+                'rider_id' => $order->rider_id,
+                'delivery_order_id' => $order->id,
+                'customer_id' => $order->customer_id,
+                'client_user_id' => $order->client_user_id,
+                'created_by' => $actorId,
+                'updated_by' => $actorId,
+            ]);
+        }
+    }
+
+    private function reverseCompletedOrderFinance(DeliveryOrder $order, ?int $actorId): void
+    {
+        if ($order->status !== 'completed') {
+            return;
+        }
+
+        $this->applyCompletedOrderFeeDelta($order, -1 * (float) $order->delivery_fee, $actorId, 'Completed order deleted');
+
+        FinanceTransaction::query()
+            ->where('type', FinanceTransaction::TYPE_EXPENSE)
+            ->where('reference_type', DeliveryOrder::class)
+            ->where('reference_id', $order->id)
+            ->whereHas('category', fn ($query) => $query->where('name', FinanceCategory::RIDER_COMMISSION))
+            ->delete();
+    }
+
+    private function createOrUpdateCommissionExpense(DeliveryOrder $order, ?int $actorId): void
+    {
+        if (! $order->rider_id || $order->status !== 'completed') {
+            return;
+        }
+
+        $rule = CommissionRule::activeForRider($order->rider_id);
+        $amount = $rule ? $rule->calculate((float) $order->delivery_fee) : 0;
+        $category = FinanceCategory::riderCommissionExpenseCategory($actorId);
+        $query = FinanceTransaction::query()
+            ->where('type', FinanceTransaction::TYPE_EXPENSE)
+            ->where('category_id', $category->id)
+            ->where('reference_type', DeliveryOrder::class)
+            ->where('reference_id', $order->id);
+
+        if ($amount <= 0) {
+            $query->delete();
+            return;
+        }
+
+        $query->updateOrCreate(
+            [
+                'type' => FinanceTransaction::TYPE_EXPENSE,
+                'category_id' => $category->id,
+                'reference_type' => DeliveryOrder::class,
+                'reference_id' => $order->id,
+            ],
+            [
+                'amount' => $amount,
+                'payment_method' => 'cash',
+                'transaction_date' => $order->completed_at?->toDateString() ?? today()->toDateString(),
+                'description' => "Rider commission for {$order->code}" . ($rule ? " ({$rule->name})." : '.'),
+                'rider_id' => $order->rider_id,
+                'delivery_order_id' => $order->id,
+                'customer_id' => $order->customer_id,
+                'client_user_id' => $order->client_user_id,
+                'created_by' => $actorId,
+                'updated_by' => $actorId,
+            ]
+        );
+    }
+
+    private function deleteCompletedOrderNotifications(DeliveryOrder $order): void
+    {
+        $order->loadMissing(['clientUser', 'rider.user']);
+
+        collect([$order->clientUser, $order->rider?->user])
+            ->filter()
+            ->unique('id')
+            ->each(function (User $user) use ($order) {
+                $user->notifications()
+                    ->where('data->order_id', $order->id)
+                    ->delete();
+            });
     }
 
     private function statusLabel(string $status): string

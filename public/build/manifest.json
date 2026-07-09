@@ -16,7 +16,7 @@
     "src": "node_modules/leaflet/dist/images/marker-icon.png"
   },
   "resources/js/main.jsx": {
-    "file": "assets/main-BXG5Mvt_.js",
+    "file": "assets/main-Bq3Pea5C.js",
     "name": "main",
     "src": "resources/js/main.jsx",
     "isEntry": true,
@@ -24,7 +24,7 @@
       "_leaflet-zdHhRoWp.js"
     ],
     "css": [
-      "assets/main-BuCCphIf.css"
+      "assets/main-BsnY21wa.css"
     ],
     "assets": [
       "assets/layers-BWBAp2CZ.png",

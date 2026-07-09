@@ -13,7 +13,11 @@ createRoot(root).render(
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js")
+    const appBaseUrl = root.dataset.appBaseUrl || window.location.origin;
+    const serviceWorkerUrl = root.dataset.serviceWorkerUrl || new URL("service-worker.js", `${appBaseUrl.replace(/\/$/, "")}/`).toString();
+    const serviceWorkerScope = `${appBaseUrl.replace(/\/$/, "")}/`;
+
+    navigator.serviceWorker.register(serviceWorkerUrl, { scope: serviceWorkerScope })
       .then((registration) => {
         console.info("[pwa] service_worker_registered", { scope: registration.scope });
       })

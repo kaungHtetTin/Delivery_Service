@@ -49,10 +49,16 @@ class SystemSeeder extends Seeder
                 'description' => 'Default primary UI color.',
             ],
             [
-                'key' => 'default_theme',
-                'value' => 'light',
+                'key' => 'app_icon',
+                'value' => '',
                 'group' => 'branding',
-                'description' => 'Default theme mode.',
+                'description' => 'Application icon image.',
+            ],
+            [
+                'key' => 'favicon',
+                'value' => '',
+                'group' => 'branding',
+                'description' => 'Browser favicon image.',
             ],
             [
                 'key' => 'contact_email',

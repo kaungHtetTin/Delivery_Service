@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\DeliveryOrder;
+use App\Models\CommissionRule;
+use App\Models\FinanceCategory;
+use App\Models\FinanceTransaction;
 use App\Models\Payment;
 use App\Models\Rider;
 use App\Models\RiderSettlement;
@@ -13,6 +16,7 @@ use App\Models\Customer;
 use App\Models\User;
 use App\Models\Shop;
 use App\Models\SystemSetting;
+use App\Notifications\OrderActivityNotification;
 use Database\Seeders\DeliveryDemoSeeder;
 use Database\Seeders\SystemSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -154,11 +158,11 @@ class DeliveryOrderApiTest extends TestCase
             'cash_held' => 0,
             'user_id' => $riderUser->id,
         ]);
-        $order = DeliveryOrder::create($this->validOrderPayload() + [
+        $order = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
             'status' => 'delivered',
             'delivery_fee' => 0,
             'rider_id' => $rider->id,
-        ]);
+        ]));
 
         $this->patchJson("/api/delivery-orders/{$order->id}/status", [
             'status' => 'completed',
@@ -181,6 +185,144 @@ class DeliveryOrderApiTest extends TestCase
         $this->assertDatabaseHas('riders', [
             'id' => $rider->id,
             'cash_held' => 4500,
+        ]);
+    }
+
+    public function test_completed_order_creates_rider_commission_expense_from_active_rule()
+    {
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
+        $rider = $this->createRider([
+            'status' => 'busy',
+            'user_id' => $riderUser->id,
+        ]);
+        CommissionRule::create([
+            'name' => 'Ten percent',
+            'type' => CommissionRule::TYPE_PERCENTAGE,
+            'percentage' => 10,
+            'is_active' => true,
+        ]);
+        $order = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'delivered',
+            'delivery_fee' => 0,
+            'rider_id' => $rider->id,
+        ]);
+
+        $this->patchJson("/api/delivery-orders/{$order->id}/status", [
+            'status' => 'completed',
+            'delivery_fee' => 5000,
+            'actor_type' => 'rider',
+            'actor_id' => $rider->id,
+        ])->assertOk();
+
+        $this->assertDatabaseHas('finance_categories', [
+            'name' => FinanceCategory::RIDER_COMMISSION,
+            'type' => FinanceCategory::TYPE_EXPENSE,
+        ]);
+        $this->assertDatabaseHas('finance_transactions', [
+            'type' => FinanceTransaction::TYPE_EXPENSE,
+            'amount' => 500,
+            'reference_type' => DeliveryOrder::class,
+            'reference_id' => $order->id,
+            'rider_id' => $rider->id,
+        ]);
+    }
+
+    public function test_office_editing_completed_delivery_fee_updates_rider_cash_and_commission()
+    {
+        $office = $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+        $rider = $this->createRider([
+            'status' => 'available',
+            'cash_held' => 4000,
+        ]);
+        CommissionRule::create([
+            'name' => 'Fixed plus percent',
+            'type' => CommissionRule::TYPE_FIXED_PLUS_PERCENTAGE,
+            'fixed_amount' => 200,
+            'percentage' => 10,
+            'is_active' => true,
+        ]);
+        $order = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'status' => 'completed',
+            'delivery_fee' => 4000,
+            'payment_status' => 'paid',
+            'rider_id' => $rider->id,
+            'completed_at' => now(),
+        ]));
+        CashCollection::create([
+            'delivery_order_id' => $order->id,
+            'rider_id' => $rider->id,
+            'product_cash_collected' => 0,
+            'delivery_fee_collected' => 4000,
+            'total_cash_collected' => 4000,
+        ]);
+
+        $this->patchJson("/api/delivery-orders/{$order->id}", [
+            'delivery_fee' => 5500,
+        ])->assertOk();
+
+        $this->assertDatabaseHas('riders', [
+            'id' => $rider->id,
+            'cash_held' => 5500,
+        ]);
+        $this->assertDatabaseHas('cash_collections', [
+            'delivery_order_id' => $order->id,
+            'delivery_fee_collected' => 5500,
+            'total_cash_collected' => 5500,
+        ]);
+        $this->assertDatabaseHas('finance_transactions', [
+            'type' => FinanceTransaction::TYPE_EXPENSE,
+            'amount' => 750,
+            'reference_type' => DeliveryOrder::class,
+            'reference_id' => $order->id,
+            'created_by' => $office->id,
+        ]);
+    }
+
+    public function test_deleting_completed_order_reverses_unsettled_rider_cash_and_commission()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+        $rider = $this->createRider([
+            'status' => 'available',
+            'cash_held' => 4500,
+        ]);
+        $category = FinanceCategory::riderCommissionExpenseCategory();
+        $order = DeliveryOrder::create(array_merge($this->validOrderPayload(), [
+            'status' => 'completed',
+            'delivery_fee' => 4500,
+            'payment_status' => 'paid',
+            'rider_id' => $rider->id,
+            'completed_at' => now(),
+        ]));
+        CashCollection::create([
+            'delivery_order_id' => $order->id,
+            'rider_id' => $rider->id,
+            'product_cash_collected' => 0,
+            'delivery_fee_collected' => 4500,
+            'total_cash_collected' => 4500,
+        ]);
+        FinanceTransaction::create([
+            'type' => FinanceTransaction::TYPE_EXPENSE,
+            'category_id' => $category->id,
+            'amount' => 450,
+            'payment_method' => 'cash',
+            'transaction_date' => today(),
+            'reference_type' => DeliveryOrder::class,
+            'reference_id' => $order->id,
+            'rider_id' => $rider->id,
+            'delivery_order_id' => $order->id,
+        ]);
+
+        $this->deleteJson("/api/delivery-orders/{$order->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('riders', [
+            'id' => $rider->id,
+            'cash_held' => 0,
+        ]);
+        $this->assertDatabaseMissing('finance_transactions', [
+            'reference_type' => DeliveryOrder::class,
+            'reference_id' => $order->id,
+            'category_id' => $category->id,
         ]);
     }
 
@@ -1501,6 +1643,46 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
+    public function test_office_can_upload_application_icon_and_favicon_settings()
+    {
+        Storage::fake('public');
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $iconResponse = $this->post('/api/settings/assets', [
+            'key' => 'app_icon',
+            'image' => $this->fakePngUpload(),
+        ])
+            ->assertOk()
+            ->assertJsonPath('key', 'app_icon');
+
+        $faviconResponse = $this->post('/api/settings/assets', [
+            'key' => 'favicon',
+            'image' => $this->fakePngUpload(),
+        ])
+            ->assertOk()
+            ->assertJsonPath('key', 'favicon');
+
+        $iconPath = str_replace('/storage/', '', $iconResponse->json('value'));
+        $faviconPath = str_replace('/storage/', '', $faviconResponse->json('value'));
+
+        Storage::disk('public')->assertExists($iconPath);
+        Storage::disk('public')->assertExists($faviconPath);
+
+        $this->assertDatabaseHas('system_settings', [
+            'key' => 'app_icon',
+            'group' => 'branding',
+        ]);
+        $this->assertDatabaseHas('system_settings', [
+            'key' => 'favicon',
+            'group' => 'branding',
+        ]);
+
+        $this->getJson('/api/settings/public')
+            ->assertOk()
+            ->assertJsonFragment(['key' => 'app_icon'])
+            ->assertJsonFragment(['key' => 'favicon']);
+    }
+
     public function test_order_can_link_saved_customer_and_shop_with_explicit_delivery_fee()
     {
         $customer = Customer::create([
@@ -2122,6 +2304,54 @@ class DeliveryOrderApiTest extends TestCase
             ->assertOk();
 
         $this->assertNotNull($client->notifications()->first()->read_at);
+    }
+
+    public function test_completed_order_deletes_client_and_rider_notifications_for_that_order()
+    {
+        $client = $this->createUser([
+            'email' => 'completed-notify-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $riderUser = $this->actingAsRole(User::ROLE_RIDER);
+        $rider = $this->createRider([
+            'status' => 'busy',
+            'user_id' => $riderUser->id,
+        ]);
+        $order = DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'status' => 'delivered',
+            'rider_id' => $rider->id,
+        ]);
+        $otherOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+        ]);
+
+        $client->notify(new OrderActivityNotification($order, 'status_updated', 'Delivery update', 'Order update.'));
+        $riderUser->notify(new OrderActivityNotification($order, 'new_assignment', 'New assignment', 'Pickup is ready.'));
+        $client->notify(new OrderActivityNotification($otherOrder, 'order_created', 'Other order', 'Keep this alert.'));
+
+        $this->assertSame(2, $client->notifications()->count());
+        $this->assertSame(1, $riderUser->notifications()->count());
+
+        $this->patchJson("/api/delivery-orders/{$order->id}/status", [
+            'status' => 'completed',
+            'delivery_fee' => 4500,
+            'actor_type' => 'rider',
+            'actor_id' => $rider->id,
+        ])->assertOk();
+
+        $this->assertSame(1, $client->notifications()->count());
+        $this->assertSame(0, $riderUser->notifications()->count());
+        $this->assertDatabaseHas('notifications', [
+            'notifiable_id' => $client->id,
+        ]);
+
+        Sanctum::actingAs($client);
+
+        $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.data.order_id', $otherOrder->id);
     }
 
     private function createRider(array $attributes = []): Rider

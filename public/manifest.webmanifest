@@ -2,8 +2,9 @@
   "name": "FlowDrop Delivery",
   "short_name": "FlowDrop",
   "description": "Delivery operations, rider GPS tracking, and client delivery updates.",
-  "start_url": "/rider",
-  "scope": "/",
+  "id": "./rider",
+  "start_url": "./rider",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#eef4f4",
   "theme_color": "#087f74",
@@ -11,7 +12,19 @@
   "categories": ["business", "productivity", "navigation"],
   "icons": [
     {
-      "src": "/flowdrop-icon.svg",
+      "src": "pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "flowdrop-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
@@ -22,15 +35,15 @@
       "name": "Rider GPS",
       "short_name": "GPS",
       "description": "Open rider GPS tracking.",
-      "url": "/rider",
-      "icons": [{ "src": "/flowdrop-icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "url": "rider",
+      "icons": [{ "src": "pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Office",
       "short_name": "Office",
       "description": "Open office operations.",
-      "url": "/office",
-      "icons": [{ "src": "/flowdrop-icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+      "url": "office",
+      "icons": [{ "src": "pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

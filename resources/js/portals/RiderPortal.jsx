@@ -67,7 +67,7 @@ function shouldDropQueuedLocation(error) {
   return discardableFields.some((field) => validationErrors[field]);
 }
 
-export function RiderPortal({ appName, markNotificationRead, notifications = [], onGpsEvent, onLocation, onStartActive, onStopActive, orders, riders, progressOrder, themeProps }) {
+export function RiderPortal({ appIconUrl = "", appName, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, riders, saveProfile, theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
@@ -88,7 +88,7 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
   if (!rider) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={incompleteOrderCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} theme={theme} unreadCount={incompleteOrderCount} />
         <main className="mobile-content">
           <MobilePlaceholder icon="bike" title="No rider profile" />
         </main>
@@ -101,7 +101,7 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
 
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={incompleteOrderCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} theme={theme} unreadCount={incompleteOrderCount} />
         <main className="mobile-content">
           <RiderJobDetail
             gpsTracking={gpsTracking}
@@ -120,13 +120,13 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={incompleteOrderCount} />
+      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} theme={theme} unreadCount={incompleteOrderCount} />
       <main className="mobile-content">
         {page === "jobs" && <RiderJobs gpsTracking={gpsTracking} onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}
         {page === "gps" && <GpsStatus activeOrders={activeOrders} gpsTracking={gpsTracking} rider={rider} />}
         {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
-        {page === "account" && <MobilePlaceholder icon="user" title="Rider account" />}
+        {page === "account" && <RiderAccount onLogout={onLogout} rider={rider} saveProfile={saveProfile} user={user} />}
       </main>
       <MobileNav
         active={page}
@@ -140,6 +140,152 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
         onNavigate={setPage}
       />
     </div>
+  );
+}
+
+function riderUserInitials(user, rider) {
+  const name = user?.name || rider?.name || "Rider";
+
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function RiderProfileAvatar({ previewUrl = "", rider, user }) {
+  const photoUrl = previewUrl || user?.profile_photo_url;
+
+  return photoUrl
+    ? <img alt="" className="profile-avatar large" src={photoUrl} />
+    : <span className="profile-avatar large">{riderUserInitials(user, rider)}</span>;
+}
+
+function RiderAccount({ onLogout, rider, saveProfile, user }) {
+  const [form, setForm] = useState({
+    name: user?.name || rider?.name || "",
+    email: user?.email || rider?.email || "",
+    phone: user?.phone || rider?.phone || "",
+    currentPassword: "",
+    password: "",
+    passwordConfirmation: "",
+    photoFile: null,
+  });
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      name: user?.name || rider?.name || "",
+      email: user?.email || rider?.email || "",
+      phone: user?.phone || rider?.phone || "",
+    }));
+  }, [rider?.email, rider?.name, rider?.phone, user?.email, user?.name, user?.phone]);
+
+  useEffect(() => {
+    if (!form.photoFile) {
+      setPhotoPreview("");
+      return undefined;
+    }
+
+    const previewUrl = URL.createObjectURL(form.photoFile);
+    setPhotoPreview(previewUrl);
+
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [form.photoFile]);
+
+  const update = (key, value) => {
+    setSaved(false);
+    setError("");
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const errorMessage = (profileError) =>
+    profileError?.payload?.message ||
+    Object.values(profileError?.payload?.errors || {})?.[0]?.[0] ||
+    profileError?.message ||
+    "Could not save profile.";
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setSaved(false);
+    setError("");
+
+    if (form.password && form.password !== form.passwordConfirmation) {
+      setError("New password and confirmation do not match.");
+      setSaving(false);
+      return;
+    }
+
+    try {
+      await saveProfile?.(form);
+      setForm((current) => ({
+        ...current,
+        currentPassword: "",
+        password: "",
+        passwordConfirmation: "",
+        photoFile: null,
+      }));
+      setSaved(true);
+    } catch (profileError) {
+      setError(errorMessage(profileError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="page-section rider-account-page">
+      <p className="eyebrow">ACCOUNT</p>
+      <h1>Rider profile</h1>
+      <form className="account-panel glass rider-account-form" onSubmit={handleSubmit}>
+        <div className="profile-summary glass">
+          <RiderProfileAvatar previewUrl={photoPreview} rider={rider} user={user} />
+          <div>
+            <strong>{form.name || "Rider"}</strong>
+            <small>{rider?.id || "Rider account"} - {rider?.status?.replaceAll("_", " ") || "active"}</small>
+          </div>
+        </div>
+        <label className="photo-upload glass">
+          <RiderProfileAvatar previewUrl={photoPreview} rider={rider} user={user} />
+          <span><strong>Profile photo</strong><small>JPG or PNG up to 2 MB</small></span>
+          <input
+            accept="image/*"
+            onChange={(event) => update("photoFile", event.target.files?.[0] || null)}
+            type="file"
+          />
+        </label>
+        <RiderProfileField label="Full name" onChange={(value) => update("name", value)} required value={form.name} />
+        <RiderProfileField inputMode="tel" label="Phone number" onChange={(value) => update("phone", value)} required value={form.phone} />
+        <RiderProfileField label="Email" onChange={(value) => update("email", value)} required type="email" value={form.email} />
+        <div className="rider-password-group">
+          <span className="eyebrow">PASSWORD</span>
+          <RiderProfileField label="Current password" onChange={(value) => update("currentPassword", value)} type="password" value={form.currentPassword} />
+          <RiderProfileField label="New password" onChange={(value) => update("password", value)} type="password" value={form.password} />
+          <RiderProfileField label="Confirm new password" onChange={(value) => update("passwordConfirmation", value)} type="password" value={form.passwordConfirmation} />
+        </div>
+        {error && <p className="auth-error">{error}</p>}
+        {saved && <p className="profile-success">Profile saved.</p>}
+        <button className="btn primary full" disabled={saving} type="submit">{saving ? "Saving..." : "Save profile"}</button>
+      </form>
+      <button className="btn secondary full account-logout" onClick={onLogout} type="button">
+        <Icon name="lock" size={16} /> Logout
+      </button>
+    </section>
+  );
+}
+
+function RiderProfileField({ inputMode, label, onChange, required = false, type = "text", value }) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      <input inputMode={inputMode} onChange={(event) => onChange(event.target.value)} required={required} type={type} value={value} />
+    </label>
   );
 }
 
@@ -598,7 +744,6 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
 }
 
 function RiderJobs({ gpsTracking, onOpen, orders, rider }) {
-  const expectedDeliveryFees = orders.reduce((total, order) => total + deliveryFeeCashDue(order), 0);
   const gpsLabel = gpsTracking.dutyActive
     ? (gpsTracking.lastSentAt ? `GPS active - ${new Date(gpsTracking.lastSentAt).toLocaleTimeString()}` : "GPS starting")
     : "GPS inactive";
@@ -623,8 +768,6 @@ function RiderJobs({ gpsTracking, onOpen, orders, rider }) {
       <section className="mini-metrics">
         <div className="glass"><small>ACTIVE JOBS</small><strong>{orders.length}</strong></div>
         <div className="glass"><small>CASH HELD</small><strong>{money(rider.cashHeld)}</strong></div>
-        <div className="glass"><small>FEES TO COLLECT</small><strong>{money(expectedDeliveryFees)}</strong></div>
-        <div className="glass"><small>PAY OFFICE</small><strong>{money(rider.cashHeld)}</strong></div>
       </section>
       <section className="section-block">
         <div className="section-heading"><div><span className="eyebrow">TODAY</span><h2>Active assignments</h2></div></div>

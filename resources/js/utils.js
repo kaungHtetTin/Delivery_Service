@@ -2,6 +2,21 @@ import { useEffect, useState } from "react";
 
 export const money = (amount) => `${Number(amount || 0).toLocaleString()} MMK`;
 
+export function dateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+export function currentMonthDateRange(date = new Date()) {
+  return {
+    date_from: dateInputValue(new Date(date.getFullYear(), date.getMonth(), 1)),
+    date_to: dateInputValue(new Date(date.getFullYear(), date.getMonth() + 1, 0)),
+  };
+}
+
 export const currentDateLabel = () =>
   new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -53,19 +68,24 @@ export function settingsByKey(settings) {
   }, {});
 }
 
-export function applyPublicSettings(settings, { setAppName, setBrand, setContactEmail, setContactPhone, setTheme }) {
+export function applyPublicSettings(settings, { setAppIconUrl, setAppName, setBrand, setContactEmail, setContactPhone, setFaviconUrl }) {
   const values = settingsByKey(settings);
 
   if (values.brand_color) {
     setBrand?.(values.brand_color);
   }
 
-  if (values.default_theme) {
-    setTheme?.(values.default_theme);
-  }
-
   if (values.app_name) {
     setAppName?.(values.app_name);
+  }
+
+  if (values.app_icon !== undefined) {
+    setAppIconUrl?.(values.app_icon || "");
+  }
+
+  if (values.favicon !== undefined) {
+    setFaviconUrl?.(values.favicon || "");
+    applyFavicon(values.favicon || "");
   }
 
   if (values.contact_email) {
@@ -79,4 +99,22 @@ export function applyPublicSettings(settings, { setAppName, setBrand, setContact
 
 export function applyBrandingSettings(settings, handlers) {
   applyPublicSettings(settings, handlers);
+}
+
+export function applyFavicon(url) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  let link = document.querySelector('link[rel="icon"]');
+
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+
+  if (url) {
+    link.href = url;
+  }
 }

@@ -14,6 +14,8 @@ class RiderSettlement extends Model
         'rider_id',
         'collected_by',
         'amount',
+        'payment_method',
+        'rider_oil_cost',
         'cash_held_before',
         'cash_held_after',
         'note',
@@ -22,6 +24,7 @@ class RiderSettlement extends Model
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'rider_oil_cost' => 'decimal:2',
         'cash_held_before' => 'decimal:2',
         'cash_held_after' => 'decimal:2',
         'collected_at' => 'datetime',

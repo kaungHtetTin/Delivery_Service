@@ -7,8 +7,11 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientAddressController;
 use App\Http\Controllers\Api\ClientProfileController;
 use App\Http\Controllers\Api\ClientShopController;
+use App\Http\Controllers\Api\CommissionRuleController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\DeliveryOrderController;
+use App\Http\Controllers\Api\FinanceCategoryController;
+use App\Http\Controllers\Api\FinanceTransactionController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\RealtimeTokenController;
@@ -75,6 +78,16 @@ Route::middleware(['auth:sanctum', 'role:client,office_admin,super_admin'])->gro
 
 Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(function () {
     Route::post('delivery-orders/{deliveryOrder}/assign', [DeliveryOrderController::class, 'assign']);
+    Route::get('finance/transactions/summary', [FinanceTransactionController::class, 'summary']);
+    Route::apiResource('finance/categories', FinanceCategoryController::class)
+        ->parameters(['categories' => 'category'])
+        ->except(['show']);
+    Route::apiResource('finance/transactions', FinanceTransactionController::class)
+        ->parameters(['transactions' => 'transaction'])
+        ->except(['show']);
+    Route::apiResource('commission-rules', CommissionRuleController::class)
+        ->parameters(['commission-rules' => 'commissionRule'])
+        ->except(['show']);
     Route::get('payments', [PaymentController::class, 'index']);
     Route::post('payments', [PaymentController::class, 'store']);
     Route::get('payments/{payment}', [PaymentController::class, 'show']);
@@ -84,6 +97,7 @@ Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(func
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('shops', ShopController::class);
     Route::get('shipping-addresses', [ShippingAddressController::class, 'index']);
+    Route::post('settings/assets', [SystemSettingController::class, 'uploadAsset']);
     Route::apiResource('settings', SystemSettingController::class)->parameters(['settings' => 'systemSetting']);
     Route::apiResource('users', UserManagementController::class);
     Route::get('reports/summary', [ReportController::class, 'summary']);

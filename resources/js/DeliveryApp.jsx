@@ -5,14 +5,20 @@ import {
   configureApi,
   createClientAddress,
   createClientShop,
+  createCommissionRule,
   createDeliveryOrder,
+  createFinanceCategory,
+  createFinanceTransaction,
   createSetting,
   createShop,
   createCustomer,
   createUser,
   createRider,
   deleteClientAddress,
+  deleteCommissionRule,
   deleteDeliveryOrder,
+  deleteFinanceCategory,
+  deleteFinanceTransaction,
   deleteSetting,
   deleteShop,
   deleteCustomer,
@@ -20,8 +26,12 @@ import {
   deleteRider,
   fetchClientAddresses,
   fetchClientShops,
+  fetchCommissionRules,
   fetchCustomers,
   fetchCurrentUser,
+  fetchFinanceCategories,
+  fetchFinanceSummary,
+  fetchFinanceTransactions,
   fetchNotifications,
   fetchOrders,
   fetchRealtimeToken,
@@ -43,11 +53,15 @@ import {
   stopRiderActive,
   updateClientAddress,
   updateClientShop,
+  updateCommissionRule,
   updateClientProfile,
   updateCurrentUserProfile,
   updateDeliveryOrderStatus,
   updateDeliveryOrder,
+  updateFinanceCategory,
+  updateFinanceTransaction,
   updateSetting,
+  uploadSettingAsset,
   updateShop,
   updateCustomer,
   updateUser,
@@ -58,7 +72,7 @@ import { ClientPortal } from "./portals/ClientPortal";
 import { RiderPortal } from "./portals/RiderPortal";
 import { AdminPortal } from "./portals/AdminPortal";
 import { createRealtimeConnection } from "./realtime";
-import { applyPublicSettings, useStoredState } from "./utils";
+import { applyPublicSettings, currentMonthDateRange, useStoredState } from "./utils";
 
 const portals = new Set(["client", "rider", "admin"]);
 const portalRoles = {
@@ -93,22 +107,27 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   const [customers, setCustomers] = useState([]);
   const [shops, setShops] = useState([]);
   const [settings, setSettings] = useState([]);
+  const [commissionRules, setCommissionRules] = useState([]);
+  const [financeCategories, setFinanceCategories] = useState([]);
+  const [financeTransactions, setFinanceTransactions] = useState([]);
+  const [financeSummary, setFinanceSummary] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(Boolean(auth?.token));
   const [error, setError] = useState("");
-  const [theme, setTheme] = useStoredState("flowdrop.theme", "light");
+  const [theme, setTheme] = useState("light");
   const [brand, setBrand] = useStoredState("flowdrop.brand", "#087f74");
   const [appName, setAppName] = useState("FlowDrop Delivery");
+  const [appIconUrl, setAppIconUrl] = useState("");
+  const [faviconUrl, setFaviconUrl] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const themeStyle = useMemo(() => ({ "--color-primary": brand }), [brand]);
-  const themeProps = { theme, setTheme, brand, setBrand };
   const publicSettingsHandlers = useMemo(
-    () => ({ setAppName, setBrand, setContactEmail, setContactPhone, setTheme }),
-    [setAppName, setBrand, setContactEmail, setContactPhone, setTheme],
+    () => ({ setAppIconUrl, setAppName, setBrand, setContactEmail, setContactPhone, setFaviconUrl }),
+    [setAppIconUrl, setAppName, setBrand, setContactEmail, setContactPhone, setFaviconUrl],
   );
   const requiredRoles = portalRoles[portal];
   const hasPortalAccess = auth?.user && requiredRoles.includes(auth.user.role);
@@ -122,6 +141,10 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     setCustomers([]);
     setShops([]);
     setSettings([]);
+    setCommissionRules([]);
+    setFinanceCategories([]);
+    setFinanceTransactions([]);
+    setFinanceSummary(null);
     setNotifications([]);
     setReportData(null);
   };
@@ -133,6 +156,26 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
       onUnauthorized: clearAuth,
     });
   }, [apiBaseUrl, auth?.token]);
+
+  const userThemeKey = auth?.user?.id
+    ? `flowdrop.theme.user.${auth.user.id}`
+    : `flowdrop.theme.guest.${portal}`;
+
+  useEffect(() => {
+    try {
+      setTheme(localStorage.getItem(userThemeKey) || "light");
+    } catch {
+      setTheme("light");
+    }
+  }, [userThemeKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(userThemeKey, theme);
+    } catch {
+      // Local theme preference is optional.
+    }
+  }, [theme, userThemeKey]);
 
   useEffect(() => {
     fetchPublicSettings()
@@ -202,6 +245,11 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
         setSettings(loadedSettings);
         applyPublicSettings(loadedSettings, publicSettingsHandlers);
         setReportData(await fetchReportSummary());
+        setCommissionRules(await fetchCommissionRules());
+        setFinanceCategories(await fetchFinanceCategories());
+        const financeDefaultFilters = currentMonthDateRange();
+        setFinanceTransactions(await fetchFinanceTransactions(financeDefaultFilters));
+        setFinanceSummary(await fetchFinanceSummary(financeDefaultFilters));
       }
     } catch (loadError) {
       setError(errorMessage(loadError));
@@ -280,6 +328,22 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   const saveCurrentUserProfile = async (profile) => {
     const user = await updateCurrentUserProfile(profile);
     setAuth((current) => current ? { ...current, user } : current);
+    setRiders((current) => current.map((item) => (
+      String(item.userId || "") === String(user.id || "")
+        ? {
+            ...item,
+            name: user.name,
+            initials: user.name
+              .split(" ")
+              .map((part) => part[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase(),
+            email: user.email,
+            phone: user.phone,
+          }
+        : item
+    )));
     setUsers((current) => current.map((item) => (
       item._apiId === user.id
         ? {
@@ -425,9 +489,107 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
 
     if (portal === "admin") {
       setReportData(await fetchReportSummary());
+      const financeDefaultFilters = currentMonthDateRange();
+      setFinanceTransactions(await fetchFinanceTransactions(financeDefaultFilters));
+      setFinanceCategories(await fetchFinanceCategories());
+      setFinanceSummary(await fetchFinanceSummary(financeDefaultFilters));
     }
 
     return response;
+  };
+
+  const refreshFinanceData = async (filters = {}) => {
+    const [transactions, summary] = await Promise.all([
+      fetchFinanceTransactions(filters),
+      fetchFinanceSummary(filters),
+    ]);
+
+    setFinanceTransactions(transactions);
+    setFinanceSummary(summary);
+
+    return { transactions, summary };
+  };
+
+  const saveFinanceCategory = async (category) => {
+    const savedCategory = category._apiId
+      ? await updateFinanceCategory(category)
+      : await createFinanceCategory(category);
+
+    setFinanceCategories((current) => [
+      savedCategory,
+      ...current.filter((item) => item.id !== savedCategory.id),
+    ]);
+
+    return savedCategory;
+  };
+
+  const removeFinanceCategory = async (categoryId) => {
+    const category = financeCategories.find((item) => item.id === categoryId);
+
+    if (!category?._apiId) {
+      return;
+    }
+
+    const disabledCategory = await deleteFinanceCategory(category);
+
+    if (disabledCategory) {
+      setFinanceCategories((current) => current.map((item) => (
+        item.id === disabledCategory.id ? disabledCategory : item
+      )));
+      return;
+    }
+
+    setFinanceCategories((current) => current.filter((item) => item.id !== categoryId));
+  };
+
+  const saveFinanceTransaction = async (transaction) => {
+    const savedTransaction = transaction._apiId
+      ? await updateFinanceTransaction(transaction)
+      : await createFinanceTransaction(transaction);
+
+    setFinanceTransactions((current) => [
+      savedTransaction,
+      ...current.filter((item) => item.id !== savedTransaction.id),
+    ]);
+    setFinanceSummary(await fetchFinanceSummary(currentMonthDateRange()));
+
+    return savedTransaction;
+  };
+
+  const removeFinanceTransaction = async (transactionId) => {
+    const transaction = financeTransactions.find((item) => item.id === transactionId);
+
+    if (!transaction?._apiId) {
+      return;
+    }
+
+    await deleteFinanceTransaction(transaction);
+    setFinanceTransactions((current) => current.filter((item) => item.id !== transactionId));
+    setFinanceSummary(await fetchFinanceSummary(currentMonthDateRange()));
+  };
+
+  const saveCommissionRule = async (rule) => {
+    const savedRule = rule._apiId
+      ? await updateCommissionRule(rule)
+      : await createCommissionRule(rule);
+
+    setCommissionRules((current) => [
+      savedRule,
+      ...current.filter((item) => item.id !== savedRule.id),
+    ]);
+
+    return savedRule;
+  };
+
+  const removeCommissionRule = async (ruleId) => {
+    const rule = commissionRules.find((item) => item.id === ruleId);
+
+    if (!rule?._apiId) {
+      return;
+    }
+
+    await deleteCommissionRule(rule);
+    setCommissionRules((current) => current.filter((item) => item.id !== ruleId));
   };
 
   const updateRiderInState = (nextRider) => {
@@ -542,6 +704,15 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     return loadedSettings.find((item) => item.key === setting.key) || setting;
   };
 
+  const uploadSettingImage = async (key, file) => {
+    const savedSetting = await uploadSettingAsset(key, file);
+    const loadedSettings = await fetchSettings();
+    setSettings(loadedSettings);
+    applyPublicSettings(loadedSettings, publicSettingsHandlers);
+
+    return loadedSettings.find((item) => item.key === savedSetting.key) || savedSetting;
+  };
+
   const removeSetting = async (settingId) => {
     const setting = settings.find((item) => item.id === settingId);
     if (!setting?._apiId) return;
@@ -596,12 +767,13 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   };
 
   if (booting) {
-    return <LoadingScreen appName={appName} theme={theme} themeStyle={themeStyle} />;
+    return <LoadingScreen appIconUrl={appIconUrl} appName={appName} theme={theme} themeStyle={themeStyle} />;
   }
 
   if (!auth?.token) {
     return (
       <AuthScreen
+        appIconUrl={appIconUrl}
         appName={appName}
         onLogin={(payload) => login(payload).then(handleAuth)}
         onRegister={(payload) => registerClient(payload).then(handleAuth)}
@@ -615,6 +787,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   if (!hasPortalAccess) {
     return (
       <RoleMismatch
+        appIconUrl={appIconUrl}
         appName={appName}
         onLogout={handleLogout}
         portal={portal}
@@ -633,11 +806,13 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           <ClientPortal
             addresses={clientAddresses}
             appName={appName}
+            appIconUrl={appIconUrl}
             contactEmail={contactEmail}
             contactPhone={contactPhone}
             markNotificationRead={markNotificationRead}
             notifications={notifications}
             onLogout={handleLogout}
+            onThemeChange={setTheme}
             orders={orders}
             removeOrder={removeOrder}
             removeAddress={removeClientAddress}
@@ -648,18 +823,28 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
             setDefaultAddress={setDefaultClientAddress}
             shops={shops}
           submitOrder={submitOrder}
-          themeProps={themeProps}
+          theme={theme}
           user={auth.user}
         />
       )}
-      {portal === "rider" && <RiderPortal appName={appName} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} orders={orders} progressOrder={progressOrder} riders={riders} themeProps={themeProps} />}
+      {portal === "rider" && <RiderPortal appIconUrl={appIconUrl} appName={appName} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onLogout={handleLogout} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} onThemeChange={setTheme} orders={orders} progressOrder={progressOrder} riders={riders} saveProfile={saveCurrentUserProfile} theme={theme} user={auth.user} />}
       {portal === "admin" && (
         <AdminPortal
           appName={appName}
+          appIconUrl={appIconUrl}
           assignRider={assignRider}
+          commissionRules={commissionRules}
           collectRiderFees={collectRiderFees}
           customers={customers}
+          financeCategories={financeCategories}
+          financeSummary={financeSummary}
+          financeTransactions={financeTransactions}
+          onRefreshFinance={refreshFinanceData}
+          onThemeChange={setTheme}
           orders={orders}
+          removeCommissionRule={removeCommissionRule}
+          removeFinanceCategory={removeFinanceCategory}
+          removeFinanceTransaction={removeFinanceTransaction}
           removeCustomer={removeCustomer}
           removeOrder={removeOrder}
           removeSetting={removeSetting}
@@ -669,8 +854,12 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           reportData={reportData}
           riders={riders}
           saveCustomer={saveCustomer}
+          saveCommissionRule={saveCommissionRule}
+          saveFinanceCategory={saveFinanceCategory}
+          saveFinanceTransaction={saveFinanceTransaction}
           saveOrder={saveOrder}
           saveSetting={saveSetting}
+          uploadSettingImage={uploadSettingImage}
           saveProfile={saveCurrentUserProfile}
           saveShop={saveShop}
           saveUser={saveUser}
@@ -679,7 +868,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           shops={shops}
           selectedOrderId={selectedOrderId}
           setSelectedOrderId={setSelectedOrderId}
-          themeProps={themeProps}
+          theme={theme}
           onLogout={handleLogout}
           user={auth.user}
           users={users}
@@ -689,12 +878,12 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
   );
 }
 
-function LoadingScreen({ appName, theme, themeStyle }) {
+function LoadingScreen({ appIconUrl = "", appName, theme, themeStyle }) {
   return (
     <div className="app-root auth-page" data-theme={theme} style={themeStyle}>
       <section className="auth-panel glass">
         <div className="auth-brand">
-          <span><Icon name="navigation" /></span>
+          <span>{appIconUrl ? <img alt="" src={appIconUrl} /> : <Icon name="navigation" />}</span>
           <div><strong>{appName}</strong><small>Checking session</small></div>
         </div>
       </section>
@@ -702,7 +891,7 @@ function LoadingScreen({ appName, theme, themeStyle }) {
   );
 }
 
-function AuthScreen({ appName, onLogin, onRegister, portal, theme, themeStyle }) {
+function AuthScreen({ appIconUrl = "", appName, onLogin, onRegister, portal, theme, themeStyle }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
     name: "",
@@ -748,7 +937,7 @@ function AuthScreen({ appName, onLogin, onRegister, portal, theme, themeStyle })
     <div className="app-root auth-page" data-theme={theme} style={themeStyle}>
       <section className="auth-panel glass">
         <div className="auth-brand">
-          <span><Icon name="navigation" /></span>
+          <span>{appIconUrl ? <img alt="" src={appIconUrl} /> : <Icon name="navigation" />}</span>
           <div>
             <strong>{appName} {portalNames[portal]}</strong>
             <small>{mode === "signup" ? "Create your client account" : "Sign in to continue"}</small>
@@ -799,7 +988,7 @@ function AuthScreen({ appName, onLogin, onRegister, portal, theme, themeStyle })
   );
 }
 
-function RoleMismatch({ appName, onLogout, portal, theme, themeStyle, user }) {
+function RoleMismatch({ appIconUrl = "", appName, onLogout, portal, theme, themeStyle, user }) {
   return (
     <div className="app-root auth-page" data-theme={theme} style={themeStyle}>
       <section className="auth-panel glass">
