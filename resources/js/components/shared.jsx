@@ -23,6 +23,22 @@ export function StatusBadge({ status }) {
   );
 }
 
+export function SocketStatusBadge({ status = "disconnected" }) {
+  const connected = status === "connected";
+  const label = connected ? "Socket online" : "Socket offline";
+
+  return (
+    <span
+      aria-label={label}
+      className={`socket-status-badge ${connected ? "connected" : "disconnected"}`}
+      title={label}
+    >
+      <span />
+      Socket
+    </span>
+  );
+}
+
 export function Logo({ appIconUrl = "", appName = "FlowDrop", compact = false }) {
   return (
     <div className="logo">
@@ -61,12 +77,13 @@ function countBadgeLabel(count) {
   return count > 99 ? "99+" : String(count);
 }
 
-export function MobileTopbar({ appIconUrl = "", appName, onNotifications, onThemeChange, theme = "light", title, unreadCount = 0 }) {
+export function MobileTopbar({ appIconUrl = "", appName, onNotifications, onThemeChange, socketStatus = "disconnected", theme = "light", title, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
       <Logo appIconUrl={appIconUrl} appName={appName} />
       {title && <span className="topbar-title">{title}</span>}
       <div className="topbar-actions">
+        <SocketStatusBadge status={socketStatus} />
         <DayNightToggle onChange={onThemeChange} theme={theme} />
         <button aria-label="Notifications" className="icon-btn notification-btn" onClick={onNotifications} type="button">
           <Icon name="bell" />

@@ -67,7 +67,7 @@ function shouldDropQueuedLocation(error) {
   return discardableFields.some((field) => validationErrors[field]);
 }
 
-export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, riders, saveProfile, theme, user }) {
+export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
@@ -88,7 +88,7 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
   if (!rider) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} theme={theme} unreadCount={incompleteOrderCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={incompleteOrderCount} />
         <main className="mobile-content">
           <MobilePlaceholder icon="bike" title="No rider profile" />
         </main>
@@ -101,7 +101,7 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
 
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} theme={theme} unreadCount={incompleteOrderCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={incompleteOrderCount} />
         <main className="mobile-content">
           <RiderJobDetail
             gpsTracking={gpsTracking}
@@ -120,7 +120,7 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} theme={theme} unreadCount={incompleteOrderCount} />
+      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={incompleteOrderCount} />
       <main className="mobile-content">
         {page === "jobs" && <RiderJobs gpsTracking={gpsTracking} onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}

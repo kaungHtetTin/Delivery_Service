@@ -13,7 +13,7 @@ const realtimeEvents = [
   "notification:created",
 ];
 
-export function createRealtimeConnection({ auth, orders = [], riders = [], onRefresh, socketToken = "" }) {
+export function createRealtimeConnection({ auth, orders = [], riders = [], onRefresh, onStatusChange, socketToken = "" }) {
   const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:3000";
   const enabled = import.meta.env.VITE_SOCKET_ENABLED !== "false";
   const socketAuth = buildSocketAuth(auth, orders, riders);
@@ -23,6 +23,7 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
       enabled,
       reason: socketAuth ? "disabled" : "missing_auth",
     });
+    onStatusChange?.("disconnected");
     return () => {};
   }
 
@@ -44,6 +45,8 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
     signed: Boolean(socketToken),
   });
 
+  onStatusChange?.("connecting");
+
   const socket = io(socketUrl, {
     auth: socketToken ? { token: socketToken } : socketAuth,
     transports: ["websocket", "polling"],
@@ -56,6 +59,7 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
       socketId: socket.id,
       transport: socket.io.engine.transport.name,
     });
+    onStatusChange?.("connected");
   });
 
   socket.on("connect_error", (error) => {
@@ -64,10 +68,12 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
       description: error.description,
       context: error.context,
     });
+    onStatusChange?.("disconnected");
   });
 
   socket.on("disconnect", (reason) => {
     console.info("[realtime] disconnected", { reason });
+    onStatusChange?.("disconnected");
   });
 
   socket.on("socket:ready", (payload) => {
@@ -84,6 +90,7 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
   return () => {
     window.clearTimeout(refreshTimer);
     realtimeEvents.forEach((eventName) => socket.off(eventName));
+    onStatusChange?.("disconnected");
     socket.disconnect();
   };
 }

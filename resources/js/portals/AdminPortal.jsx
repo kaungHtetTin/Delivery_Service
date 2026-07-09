@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { formatSettingValue, settingValueForInput } from "../api";
 import { activeStatuses, currentMonthDateRange, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
-import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, StatusBadge } from "../components/shared";
+import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, SocketStatusBadge, StatusBadge } from "../components/shared";
 import { AdminReports } from "./admin/AdminReports";
 
 function todayDateInputValue() {
@@ -136,6 +136,7 @@ export function AdminPortal({
   saveUser,
   selectedOrderId,
   setSelectedOrderId,
+  socketStatus = "disconnected",
   settings = [],
   shops = [],
   onLogout,
@@ -304,6 +305,7 @@ export function AdminPortal({
           </div>
           <div className="topbar-actions">
             <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
+            <SocketStatusBadge status={socketStatus} />
             <DayNightToggle onChange={onThemeChange} theme={theme} />
             <button aria-label={`${incompleteOrderCount} unfinished orders`} className="icon-btn notification-btn" onClick={() => setPage("orders")} type="button">
               <Icon name="bell" />

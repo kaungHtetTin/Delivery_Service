@@ -50,7 +50,7 @@ function distanceLabel(distance) {
   return distance < 1000 ? `${Math.round(distance)}m away` : `${(distance / 1000).toFixed(1)}km away`;
 }
 
-export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, shops = [], submitOrder, theme, user }) {
+export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, shops = [], socketStatus = "disconnected", submitOrder, theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.client.page", "home");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.client.selectedOrder", null);
   const activeOrder = orders.find((order) => activeStatuses.has(order.status));
@@ -77,7 +77,7 @@ export function ClientPortal({ addresses = [], appIconUrl = "", appName, contact
 
   return (
     <div className="mobile-app">
-      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onNotifications={() => setPage("notifications")} onThemeChange={onThemeChange} theme={theme} unreadCount={unreadCount} />
+      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onNotifications={() => setPage("notifications")} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
       <main className="mobile-content">
         {page === "home" && (
           <ClientHome activeOrder={activeOrder} contactEmail={contactEmail} contactPhone={contactPhone} onCreate={() => setPage("new")} onTrack={openTracking} onViewAll={() => setPage("orders")} orders={orders} user={user} />

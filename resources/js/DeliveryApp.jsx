@@ -117,6 +117,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(Boolean(auth?.token));
   const [error, setError] = useState("");
+  const [socketStatus, setSocketStatus] = useState("disconnected");
   const [theme, setTheme] = useState("light");
   const [brand, setBrand] = useStoredState("flowdrop.brand", "#087f74");
   const [appName, setAppName] = useState("FlowDrop Delivery");
@@ -152,6 +153,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     setFinanceSummary(null);
     setNotifications([]);
     setReportData(null);
+    setSocketStatus("disconnected");
   };
 
   useEffect(() => {
@@ -269,6 +271,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
 
   useEffect(() => {
     if (!hasPortalAccess) {
+      setSocketStatus("disconnected");
       return undefined;
     }
 
@@ -286,6 +289,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           orders,
           riders,
           onRefresh: loadData,
+          onStatusChange: setSocketStatus,
           socketToken: realtimeAuth.token,
         });
       })
@@ -302,6 +306,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           orders,
           riders,
           onRefresh: loadData,
+          onStatusChange: setSocketStatus,
         });
       });
 
@@ -828,12 +833,13 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
             saveProfile={saveClientProfile}
             setDefaultAddress={setDefaultClientAddress}
             shops={shops}
-          submitOrder={submitOrder}
-          theme={theme}
-          user={auth.user}
-        />
+            socketStatus={socketStatus}
+            submitOrder={submitOrder}
+            theme={theme}
+            user={auth.user}
+          />
       )}
-      {portal === "rider" && <RiderPortal appIconUrl={appIconUrl} appName={appName} mapTileUrl={mapTileUrl} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onLogout={handleLogout} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} onThemeChange={setTheme} orders={orders} progressOrder={progressOrder} riders={riders} saveProfile={saveCurrentUserProfile} theme={theme} user={auth.user} />}
+      {portal === "rider" && <RiderPortal appIconUrl={appIconUrl} appName={appName} mapTileUrl={mapTileUrl} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onLogout={handleLogout} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} onThemeChange={setTheme} orders={orders} progressOrder={progressOrder} riders={riders} saveProfile={saveCurrentUserProfile} socketStatus={socketStatus} theme={theme} user={auth.user} />}
       {portal === "admin" && (
         <AdminPortal
           appName={appName}
@@ -875,6 +881,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           shops={shops}
           selectedOrderId={selectedOrderId}
           setSelectedOrderId={setSelectedOrderId}
+          socketStatus={socketStatus}
           theme={theme}
           onLogout={handleLogout}
           user={auth.user}
