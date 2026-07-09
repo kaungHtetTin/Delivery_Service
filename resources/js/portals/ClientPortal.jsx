@@ -50,7 +50,7 @@ function distanceLabel(distance) {
   return distance < 1000 ? `${Math.round(distance)}m away` : `${(distance / 1000).toFixed(1)}km away`;
 }
 
-export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, shops = [], socketStatus = "disconnected", submitOrder, theme, user }) {
+export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, removeShop, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, setDefaultShop, shops = [], socketStatus = "disconnected", submitOrder, theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.client.page", "home");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.client.selectedOrder", null);
   const activeOrder = orders.find((order) => activeStatuses.has(order.status));
@@ -126,10 +126,12 @@ export function ClientPortal({ addresses = [], appIconUrl = "", appName, contact
             addresses={addresses}
             onLogout={onLogout}
             removeAddress={removeAddress}
+            removeShop={removeShop}
             saveAddress={saveAddress}
             saveProfile={saveProfile}
             saveShop={saveShop}
             setDefaultAddress={setDefaultAddress}
+            setDefaultShop={setDefaultShop}
             shops={shops}
             user={user}
           />
@@ -315,13 +317,12 @@ function ClientOrders({ orders, onDelete, onEdit, onTrack }) {
   );
 }
 
-function ClientAccount({ addresses, onLogout, removeAddress, saveAddress, saveProfile, saveShop, setDefaultAddress, shops, user }) {
+function ClientAccount({ addresses, onLogout, removeAddress, removeShop, saveAddress, saveProfile, saveShop, setDefaultAddress, setDefaultShop, shops, user }) {
   const [profile, setProfile] = useState({
     name: user.name || "",
     phone: user.phone || "",
     email: user.email || "",
   });
-  const defaultPickupShop = shops.find((shop) => shop.status === "active" && shop.isDefault) || shops.find((shop) => shop.status === "active") || shops[0];
   const [editingAddress, setEditingAddress] = useState(null);
   const [editingShop, setEditingShop] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -381,27 +382,32 @@ function ClientAccount({ addresses, onLogout, removeAddress, saveAddress, savePr
 
       <section className="section-block">
         <div className="section-heading">
-          <div><span className="eyebrow">PICKUP</span><h2>Default business pickup</h2></div>
-          <button className="text-btn" onClick={() => setEditingShop(defaultPickupShop || {})} type="button">{defaultPickupShop ? "Edit" : "Add"}</button>
+          <div><span className="eyebrow">PICKUP</span><h2>Saved pickup addresses</h2></div>
+          <button className="text-btn" onClick={() => setEditingShop({})} type="button">Add pickup</button>
         </div>
-        {defaultPickupShop ? (
-          <article className="delivery-list-card glass address-card">
-            <div className="card-row">
-              <div><span className="order-code">{defaultPickupShop.name}</span><small>{defaultPickupShop.contactName || defaultPickupShop.phone}</small></div>
-              <StatusBadge status="default" />
-            </div>
-            <p>{defaultPickupShop.address}</p>
-            {defaultPickupShop.note && <small>{defaultPickupShop.note}</small>}
-            <div className="address-actions">
-              <button className="btn secondary" onClick={() => setEditingShop(defaultPickupShop)} type="button">Edit default pickup</button>
-            </div>
-          </article>
-        ) : (
-          <button className="delivery-list-card glass" onClick={() => setEditingShop({})} type="button">
-            <div className="card-row"><strong>Add default pickup address</strong><Icon name="plus" size={17} /></div>
-            <p>Save your shop or business location to prefill pickup details in future delivery requests.</p>
-          </button>
-        )}
+        <div className="delivery-list">
+          {shops.length === 0 && (
+            <button className="delivery-list-card glass" onClick={() => setEditingShop({})} type="button">
+              <div className="card-row"><strong>Add default pickup address</strong><Icon name="plus" size={17} /></div>
+              <p>Save your shop or business location to prefill pickup details in future delivery requests.</p>
+            </button>
+          )}
+          {shops.map((shop) => (
+            <article className="delivery-list-card glass address-card" key={shop.id}>
+              <div className="card-row">
+                <div><span className="order-code">{shop.name}</span><small>{shop.contactName || shop.phone}</small></div>
+                {shop.isDefault ? <StatusBadge status="default" /> : <StatusBadge status={shop.status || "active"} />}
+              </div>
+              <p>{shop.address}</p>
+              {shop.note && <small>{shop.note}</small>}
+              <div className="address-actions">
+                {!shop.isDefault && <button className="btn secondary" onClick={() => setDefaultShop(shop.id)} type="button">Set default</button>}
+                <button className="btn secondary" onClick={() => setEditingShop(shop)} type="button">Edit</button>
+                <button className="btn danger" onClick={() => window.confirm(`Delete ${shop.name}?`) && removeShop(shop.id)} type="button">Delete</button>
+              </div>
+            </article>
+          ))}
+        </div>
       </section>
 
       <button className="btn secondary full account-logout" onClick={onLogout} type="button">
@@ -419,7 +425,7 @@ function ClientAccount({ addresses, onLogout, removeAddress, saveAddress, savePr
       {editingShop && (
         <ShopEditor
           close={() => setEditingShop(null)}
-          onSave={(shop) => saveShop({ ...shop, isDefault: true, status: "active" }).then(() => setEditingShop(null))}
+          onSave={(shop) => saveShop({ ...shop, status: shop.status || "active" }).then(() => setEditingShop(null))}
           shop={editingShop}
           user={user}
         />
@@ -488,7 +494,7 @@ function ShopEditor({ close, onSave, shop, user }) {
     email: shop.email || user.email || "",
     address: shop.address || "",
     status: shop.status || "active",
-    isDefault: true,
+    isDefault: shop.isDefault ?? false,
     note: shop.note || "",
   });
   const [saving, setSaving] = useState(false);
@@ -516,7 +522,11 @@ function ShopEditor({ close, onSave, shop, user }) {
           <TextField label="Email" onChange={(value) => update("email", value)} value={form.email} />
           <TextField label="Pickup address" onChange={(value) => update("address", value)} value={form.address} />
           <TextField label="Note" onChange={(value) => update("note", value)} value={form.note} />
-          <p className="muted span-2">This is the default pickup address used first in future delivery forms.</p>
+          <label className="switch-row glass">
+            <span><strong>Default pickup address</strong><small>Use this pickup first in future forms</small></span>
+            <input checked={form.isDefault} onChange={(event) => update("isDefault", event.target.checked)} type="checkbox" />
+            <i />
+          </label>
         </div>
         <div className="modal-actions">
           <button className="btn secondary" onClick={close} type="button">Cancel</button>

@@ -15,6 +15,7 @@ import {
   createUser,
   createRider,
   deleteClientAddress,
+  deleteClientShop,
   deleteCommissionRule,
   deleteDeliveryOrder,
   deleteFinanceCategory,
@@ -44,6 +45,7 @@ import {
   login,
   logout,
   makeClientAddressDefault,
+  makeClientShopDefault,
   markNotificationRead as markNotificationReadRequest,
   mapLocation,
   reportRiderGpsEvent as reportRiderGpsEventRequest,
@@ -427,6 +429,28 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     setShops(await fetchClientShops());
 
     return savedShop;
+  };
+
+  const removeClientShop = async (shopId) => {
+    const shop = shops.find((item) => item.id === shopId);
+
+    if (!shop?._apiId) {
+      return;
+    }
+
+    await deleteClientShop(shop);
+    setShops(await fetchClientShops());
+  };
+
+  const setDefaultClientShop = async (shopId) => {
+    const shop = shops.find((item) => item.id === shopId);
+
+    if (!shop?._apiId) {
+      return;
+    }
+
+    await makeClientShopDefault(shop);
+    setShops(await fetchClientShops());
   };
 
   const assignRider = async (orderId, riderId) => {
@@ -844,11 +868,13 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
             orders={orders}
             removeOrder={removeOrder}
             removeAddress={removeClientAddress}
+            removeShop={removeClientShop}
             saveAddress={saveClientAddress}
             saveOrder={saveOrder}
             saveShop={saveClientShop}
             saveProfile={saveClientProfile}
             setDefaultAddress={setDefaultClientAddress}
+            setDefaultShop={setDefaultClientShop}
             shops={shops}
             socketStatus={socketStatus}
             submitOrder={submitOrder}
