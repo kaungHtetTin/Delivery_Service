@@ -32,7 +32,7 @@ return [
 
     'socket_server' => [
         'enabled' => env('SOCKET_SERVER_ENABLED', true),
-        'url' => env('SOCKET_SERVER_URL', 'http://127.0.0.1:4100'),
+        'url' => env('SOCKET_SERVER_URL', 'http://127.0.0.1:3000'),
         'key' => env('SOCKET_SERVER_KEY', env('INTERNAL_API_KEY')),
         'auth_secret' => env('SOCKET_AUTH_SECRET'),
         'token_ttl' => env('SOCKET_AUTH_TOKEN_TTL', 3600),

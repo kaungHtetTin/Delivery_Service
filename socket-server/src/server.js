@@ -12,7 +12,7 @@ import { createRateLimiter } from "./rate-limit.js";
 export function loadConfig(env = process.env) {
   return {
     host: env.HOST || "0.0.0.0",
-    port: Number(env.PORT || 4100),
+    port: Number(env.PORT || 3000),
     corsOrigins: parseOrigins(env.CORS_ORIGIN || ""),
     internalApiKey: env.INTERNAL_API_KEY || "",
     socketAuthSecret: env.SOCKET_AUTH_SECRET || "",
@@ -48,6 +48,7 @@ export function validateConfig(config) {
 export function createRealtimeServer(config = loadConfig()) {
   const app = express();
   const server = http.createServer(app);
+  const startedAt = new Date();
   const corsOptions = createCorsOptions(config);
   const io = new Server(server, {
     cors: corsOptions,
@@ -63,6 +64,12 @@ export function createRealtimeServer(config = loadConfig()) {
   app.use(handleCorsError);
   app.use(express.json({ limit: "1mb" }));
 
+  app.get("/", (request, response) => {
+    response
+      .type("html")
+      .send(renderStatusPage({ config, io, request, startedAt }));
+  });
+
   app.get("/health", (request, response) => {
     response.json({
       ok: true,
@@ -70,6 +77,16 @@ export function createRealtimeServer(config = loadConfig()) {
       sockets: io.engine.clientsCount,
       uptime: process.uptime(),
       env: config.nodeEnv,
+    });
+  });
+
+  app.get("/routes", (request, response) => {
+    response.json({
+      ok: true,
+      service: "flowdrop-socket-server",
+      socketPath: "/socket.io",
+      routes: routeInventory(config),
+      socketEvents: socketEventInventory(),
     });
   });
 
@@ -332,8 +349,16 @@ function handleCorsError(error, request, response, next) {
 }
 
 function requestAction(request) {
+  if (request.path === "/") {
+    return "status_page";
+  }
+
   if (request.path === "/health") {
     return "health_check";
+  }
+
+  if (request.path === "/routes") {
+    return "route_inventory";
   }
 
   if (request.path === "/tokens/development") {
@@ -345,6 +370,289 @@ function requestAction(request) {
   }
 
   return "unknown_request";
+}
+
+function routeInventory(config) {
+  return [
+    {
+      method: "GET",
+      path: "/",
+      name: "Status page",
+      access: "public",
+      description: "Browser dashboard for confirming the socket server is active.",
+    },
+    {
+      method: "GET",
+      path: "/health",
+      name: "Health check",
+      access: "public",
+      description: "Machine-readable uptime, environment, and connected socket count.",
+    },
+    {
+      method: "GET",
+      path: "/routes",
+      name: "Route inventory",
+      access: "public",
+      description: "Machine-readable list of HTTP routes and socket events.",
+    },
+    {
+      method: "POST",
+      path: "/events",
+      name: "Publish event",
+      access: "internal key",
+      description: "Publish a typed realtime event to calculated rooms.",
+    },
+    {
+      method: "POST",
+      path: "/events/order-updated",
+      name: "Publish order update",
+      access: "internal key",
+      description: "Publish order.updated using the order event route.",
+    },
+    {
+      method: "POST",
+      path: "/events/payment",
+      name: "Publish payment update",
+      access: "internal key",
+      description: "Publish payment.updated events.",
+    },
+    {
+      method: "POST",
+      path: "/events/cash-collection",
+      name: "Publish cash collection update",
+      access: "internal key",
+      description: "Publish cash.collection.updated events.",
+    },
+    {
+      method: "POST",
+      path: "/events/rider-location",
+      name: "Publish rider location update",
+      access: "internal key",
+      description: "Publish rider.location.updated events.",
+    },
+    {
+      method: "POST",
+      path: "/events/notification",
+      name: "Publish notification",
+      access: "internal key",
+      description: "Publish notification.created events.",
+    },
+    {
+      method: "POST",
+      path: "/tokens/development",
+      name: "Development auth token",
+      access: config.nodeEnv === "production" ? "disabled" : "development only",
+      description: "Create signed test tokens outside production.",
+    },
+    {
+      method: "WS",
+      path: "/socket.io",
+      name: "Socket.IO transport",
+      access: "signed auth token",
+      description: "Realtime websocket and polling transport endpoint.",
+    },
+  ];
+}
+
+function socketEventInventory() {
+  return [
+    {
+      direction: "server -> client",
+      event: "socket:ready",
+      description: "Sent after a socket connects and joins its base rooms.",
+    },
+    {
+      direction: "client -> server",
+      event: "order:watch",
+      description: "Join an order room when the socket is allowed to watch it.",
+    },
+    {
+      direction: "client -> server",
+      event: "order:unwatch",
+      description: "Leave an order room.",
+    },
+    {
+      direction: "server -> client",
+      event: "order:created, order:updated, order:assigned, order:status-updated, order.deleted",
+      description: "Delivery order lifecycle events.",
+    },
+    {
+      direction: "server -> client",
+      event: "payment:updated, payment.deleted, cash-collection:updated",
+      description: "Payment and cash collection events.",
+    },
+    {
+      direction: "server -> client",
+      event: "rider:location-updated, notification:created",
+      description: "Live GPS and notification events.",
+    },
+  ];
+}
+
+function renderStatusPage({ config, io, request, startedAt }) {
+  const routes = routeInventory(config);
+  const socketEvents = socketEventInventory();
+  const rooms = [...io.sockets.adapter.rooms.entries()]
+    .filter(([room, sockets]) => !sockets.has(room))
+    .map(([room, sockets]) => ({ room, sockets: sockets.size }))
+    .sort((first, second) => first.room.localeCompare(second.room));
+  const routeRows = routes.map((route) => `
+    <tr>
+      <td><code>${escapeHtml(route.method)}</code></td>
+      <td><code>${escapeHtml(route.path)}</code></td>
+      <td>${escapeHtml(route.name)}</td>
+      <td><span class="pill">${escapeHtml(route.access)}</span></td>
+      <td>${escapeHtml(route.description)}</td>
+    </tr>
+  `).join("");
+  const eventRows = socketEvents.map((socketEvent) => `
+    <tr>
+      <td>${escapeHtml(socketEvent.direction)}</td>
+      <td><code>${escapeHtml(socketEvent.event)}</code></td>
+      <td>${escapeHtml(socketEvent.description)}</td>
+    </tr>
+  `).join("");
+  const roomRows = rooms.length
+    ? rooms.map((room) => `
+      <tr>
+        <td><code>${escapeHtml(room.room)}</code></td>
+        <td>${room.sockets}</td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="2">No shared rooms active right now.</td></tr>';
+  const origin = `${request.protocol}://${request.get("host")}`;
+  const wsProtocol = request.protocol === "https" ? "wss" : "ws";
+  const wsBaseUrl = `${wsProtocol}://${request.get("host")}`;
+  const status = validateConfig(config);
+  const statusLabel = status.length && config.nodeEnv === "production" ? "Needs attention" : "Active";
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FlowDrop Socket Server</title>
+    <style>
+      :root { color-scheme: light; --bg: #eef4f4; --panel: #ffffffde; --text: #172033; --muted: #69768a; --primary: #087f74; --border: #dce5e5; --good: #16794c; --warn: #9a5700; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; color: var(--text); background: linear-gradient(180deg, #e7f4f3, var(--bg)); font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0; }
+      header { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+      h1, h2, p { margin: 0; }
+      h1 { font-size: clamp(26px, 4vw, 40px); line-height: 1.05; letter-spacing: 0; }
+      h2 { font-size: 16px; margin-bottom: 12px; }
+      .eyebrow { color: var(--primary); font-size: 12px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
+      .muted { color: var(--muted); }
+      .status { display: inline-flex; gap: 8px; align-items: center; min-height: 34px; padding: 0 12px; color: #fff; background: var(--good); border-radius: 999px; font-weight: 800; }
+      .status.warn { background: var(--warn); }
+      .dot { width: 8px; height: 8px; background: currentColor; border-radius: 50%; box-shadow: 0 0 0 4px #ffffff42; }
+      .grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 12px; }
+      .card, section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 25px #1e3d430f; }
+      .card { min-height: 92px; padding: 14px; display: grid; align-content: center; gap: 4px; }
+      .card small { color: var(--muted); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+      .card strong { font-size: 22px; }
+      section { padding: 16px; margin-top: 12px; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 10px 12px; text-align: left; border-top: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+      code { padding: 2px 5px; background: #087f7412; border-radius: 5px; color: #075f57; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+      .pill { display: inline-flex; padding: 3px 8px; color: var(--primary); background: #087f7412; border: 1px solid #087f7420; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+      .links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+      .links a { display: inline-flex; min-height: 34px; padding: 0 11px; color: #fff; background: var(--primary); border-radius: 7px; align-items: center; text-decoration: none; font-weight: 800; }
+      @media (max-width: 860px) { header { align-items: flex-start; flex-direction: column; } .grid { grid-template-columns: 1fr 1fr; } table { min-width: 760px; } section { overflow-x: auto; } }
+      @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">FlowDrop Realtime</p>
+          <h1>Socket server</h1>
+          <p class="muted">HTTP route and Socket.IO status for ${escapeHtml(origin)}</p>
+        </div>
+        <span class="status ${status.length && config.nodeEnv === "production" ? "warn" : ""}"><span class="dot"></span>${escapeHtml(statusLabel)}</span>
+      </header>
+
+      <div class="grid">
+        <div class="card"><small>Environment</small><strong>${escapeHtml(config.nodeEnv)}</strong></div>
+        <div class="card"><small>Connected sockets</small><strong>${io.engine.clientsCount}</strong></div>
+        <div class="card"><small>Uptime</small><strong>${formatUptime(process.uptime())}</strong></div>
+        <div class="card"><small>Started</small><strong>${escapeHtml(startedAt.toLocaleString())}</strong></div>
+      </div>
+
+      <section>
+        <h2>Configuration</h2>
+        <table>
+          <tbody>
+            <tr><th>Socket path</th><td><code>/socket.io</code></td></tr>
+            <tr><th>WebSocket base URL</th><td><code>${escapeHtml(wsBaseUrl)}</code></td></tr>
+            <tr><th>Socket.IO URL</th><td><code>${escapeHtml(`${wsBaseUrl}/socket.io`)}</code></td></tr>
+            <tr><th>CORS origins</th><td>${escapeHtml(config.corsOrigins.length ? config.corsOrigins.join(", ") : "*")}</td></tr>
+            <tr><th>Internal API key</th><td>${config.internalApiKey ? "Configured" : "Missing"}</td></tr>
+            <tr><th>Socket auth secret</th><td>${config.socketAuthSecret ? "Configured" : "Missing"}</td></tr>
+            <tr><th>Unsigned auth</th><td>${config.allowUnsignedAuth ? "Allowed" : "Disabled"}</td></tr>
+            <tr><th>Publish rate limit</th><td>${config.publishRateLimit} requests / ${Math.round(config.publishRateWindowMs / 1000)}s</td></tr>
+          </tbody>
+        </table>
+        <div class="links">
+          <a href="/health">Open /health</a>
+          <a href="/routes">Open /routes</a>
+        </div>
+      </section>
+
+      <section>
+        <h2>HTTP Routes</h2>
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Name</th><th>Access</th><th>Description</th></tr></thead>
+          <tbody>${routeRows}</tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Socket Events</h2>
+        <table>
+          <thead><tr><th>Direction</th><th>Event</th><th>Description</th></tr></thead>
+          <tbody>${eventRows}</tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Active Rooms</h2>
+        <table>
+          <thead><tr><th>Room</th><th>Sockets</th></tr></thead>
+          <tbody>${roomRows}</tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+function formatUptime(seconds) {
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${remainingSeconds}s`;
+  }
+
+  return `${remainingSeconds}s`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function countSocketsByRoom(io, rooms) {

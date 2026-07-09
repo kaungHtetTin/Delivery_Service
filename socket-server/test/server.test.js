@@ -41,6 +41,33 @@ test("health returns service status", async () => {
   assert.equal(typeof payload.sockets, "number");
 });
 
+test("status page renders server and route confirmation", async () => {
+  const response = await fetch(`${baseUrl}/`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  assert.match(html, /FlowDrop Realtime/);
+  assert.match(html, /Socket server/);
+  assert.match(html, /\/health/);
+  assert.match(html, /\/socket\.io/);
+  assert.match(html, /WebSocket base URL/);
+  assert.match(html, /ws:\/\/127\.0\.0\.1:/);
+  assert.match(html, /Connected sockets/);
+});
+
+test("routes endpoint returns route and socket event inventory", async () => {
+  const response = await fetch(`${baseUrl}/routes`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.socketPath, "/socket.io");
+  assert.ok(payload.routes.some((route) => route.method === "GET" && route.path === "/"));
+  assert.ok(payload.routes.some((route) => route.method === "POST" && route.path === "/events/notification"));
+  assert.ok(payload.socketEvents.some((socketEvent) => socketEvent.event === "socket:ready"));
+});
+
 test("unauthorized publish calls are rejected", async () => {
   const response = await fetch(`${baseUrl}/events`, {
     method: "POST",

@@ -23,7 +23,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 Update `.env` before using it outside local development:
 
 ```dotenv
-PORT=4100
+PORT=3000
 CORS_ORIGIN=http://localhost,http://127.0.0.1,http://localhost:80,http://127.0.0.1:80,http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173
 INTERNAL_API_KEY=change-this-in-production
 SOCKET_AUTH_SECRET=change-this-signing-secret
@@ -47,7 +47,7 @@ npm start
 Health check:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:4100/health
+Invoke-RestMethod http://127.0.0.1:3000/health
 ```
 
 Test:
@@ -62,7 +62,7 @@ Use strong, different secrets for the internal publish key and socket token sign
 
 ```dotenv
 NODE_ENV=production
-PORT=4100
+PORT=3000
 HOST=0.0.0.0
 CORS_ORIGIN=https://your-domain.example
 INTERNAL_API_KEY=long-random-server-to-server-key
@@ -121,7 +121,7 @@ WantedBy=multi-user.target
 Laravel can call the socket server after an order, rider location, notification, or cash collection changes.
 
 ```http
-POST http://127.0.0.1:4100/events
+POST http://127.0.0.1:3000/events
 X-Socket-Server-Key: change-this-in-production
 Content-Type: application/json
 ```
@@ -172,7 +172,7 @@ Development unsigned auth example:
 ```js
 import { io } from "socket.io-client";
 
-const socket = io("http://127.0.0.1:4100", {
+const socket = io("http://127.0.0.1:3000", {
   auth: {
     role: "office"
   }
@@ -187,7 +187,7 @@ socket.on("order:status-updated", (event) => {
 For rider/client views:
 
 ```js
-const socket = io("http://127.0.0.1:4100", {
+const socket = io("http://127.0.0.1:3000", {
   auth: {
     role: "rider",
     userId: "8",

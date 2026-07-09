@@ -14,7 +14,7 @@ const realtimeEvents = [
 ];
 
 export function createRealtimeConnection({ auth, orders = [], riders = [], onRefresh, socketToken = "" }) {
-  const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:4100";
+  const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:3000";
   const enabled = import.meta.env.VITE_SOCKET_ENABLED !== "false";
   const socketAuth = buildSocketAuth(auth, orders, riders);
 
