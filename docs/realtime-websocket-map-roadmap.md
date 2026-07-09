@@ -1,329 +1,503 @@
-# Realtime Websocket and Map Tracking Roadmap
+# GPS Realtime Tracking System Roadmap
 
 ## Goal
 
-Add realtime order updates, rider location streaming, and office/client map tracking without making the core delivery workflow depend on websocket availability.
+Activate the rider GPS page and build full realtime rider tracking for office and clients.
 
-Laravel remains the source of truth. The separate Node.js socket server broadcasts changes after Laravel saves them.
+The target operating process is:
 
-## Target Architecture
+- Rider taps **Start active** when ready to work.
+- Start active means the rider is online, listening for assignments, and sharing live location.
+- Office can see all active/online riders during working hours.
+- Client can see only their assigned rider, and only after the product is picked up.
+- GPS permission denial should warn the rider but should not block the delivery workflow.
+- The first production goal is live current position only, not route history playback.
 
-```text
-Client / Office / Rider app
-        |
-        | HTTP API
-        v
-Laravel API  ---->  MySQL
-        |
-        | server-to-server event publish
-        v
-Node.js Socket Server
-        |
-        | Socket.IO events
-        v
-Connected office / client / rider screens
-```
+## Important Browser And PWA Reality
 
-## Core Principles
+Browser geolocation can support foreground live tracking with `watchPosition()` and permission prompts, but reliable all-day background GPS is not guaranteed by a normal web page or PWA on all devices.
 
-- Laravel owns all business rules, validation, order state, rider assignment, payments, and cash collection.
-- Socket server only broadcasts events.
-- If the socket server is down, the application must still work through normal HTTP API requests.
-- Frontend should treat websocket events as "something changed" and refetch Laravel API data when exact state matters.
-- Realtime map tracking should be opt-in and visible only for active deliveries.
-- Rider location should update while the rider is on duty or working an active job, not permanently.
+Planned approach:
 
-## Phase 1. Socket Server Hardening
+- Use PWA for installability, app-shell caching, offline queueing, and better mobile experience.
+- Use browser Geolocation API for the first web/PWA version.
+- Do not build all-day native background tracking for the current operation.
+- When the rider opens or returns to the app during working hours, immediately refresh GPS, restart the watcher if needed, and flush queued updates.
+- Do not promise perfect background GPS from a browser-only PWA.
 
-### Required
+Reference notes:
 
-- Finalize separate `socket-server` install and startup flow.
-- Add production `.env` values:
-  - `PORT`
-  - `CORS_ORIGIN`
-  - `INTERNAL_API_KEY`
-  - `SOCKET_AUTH_SECRET`
-  - `ALLOW_UNSIGNED_AUTH=false`
-- Add process manager setup notes for production, for example PM2 or systemd.
-- Add structured logging for:
-  - socket connect/disconnect
-  - event publish success/failure
-  - auth failure
-- Add graceful shutdown handling.
-- Add basic rate limits for HTTP publish endpoints.
+- MDN Geolocation API: geolocation requires user permission and secure contexts.
+- MDN `watchPosition()`: browser can watch position changes while the page/app is allowed to run.
+- MDN/Chrome PWA background sync docs: service workers can run background sync tasks, but this is not the same as continuous background GPS tracking.
 
-### Acceptance Check
+## Current System Starting Point
 
-- `npm install` works inside `socket-server`.
-- `npm start` starts the server.
-- `/health` returns service status.
-- Unauthorized event publish calls are rejected.
-- Valid event publish calls emit to expected rooms.
+Already available or partially available:
 
-## Phase 2. Laravel Realtime Configuration
+- `rider_locations` data model exists.
+- Laravel endpoint exists:
+  - `POST /api/riders/{rider}/locations`
+- Laravel publishes `rider.location.updated`.
+- Socket server supports `rider.location.updated` and `rider:location-updated`.
+- Office app has placeholder map components.
+- Rider app has a placeholder GPS page.
+- Client app has workflow tracking, but not real GPS tracking yet.
 
-### Required
+## Tracking Policy
 
-- Add Laravel environment values:
-  - `SOCKET_SERVER_URL`
-  - `SOCKET_SERVER_KEY`
-  - `SOCKET_AUTH_SECRET`
-  - `REALTIME_ENABLED=true`
-- Add a Laravel service class, for example `RealtimeEventPublisher`.
-- Publisher should use Laravel HTTP client to call the Node server.
-- Publisher must fail silently/log-only if the socket server is unavailable.
-- Add feature flag check so realtime can be disabled without changing code.
-- Add tests proving order operations still succeed when the socket server is down.
+### Rider Status
 
-### Acceptance Check
+Add a clear duty state:
 
-- Laravel can publish a test event to the socket server.
-- Laravel order actions do not fail when the socket server is offline.
-- Failed publish attempts are logged but do not rollback order changes.
+- `offline`: not working, no location sharing.
+- `online` or `available`: working and sharing location.
+- `busy`: assigned and working an active delivery.
+- `on_break`: temporarily paused; location sharing can pause or use low frequency.
+- `suspended`: blocked by office.
 
-## Phase 3. Socket Auth Token Endpoint
+### Start Active
 
-### Required
+When rider taps **Start active**:
 
-- Add Laravel API endpoint:
-  - `GET /api/realtime/token`
-- Endpoint returns a short-lived signed socket token.
-- Token payload should include:
-  - `role`
-  - `userId`
-  - `riderId` when user is a rider
-  - active `orderIds` the user can watch
-  - `exp`
-- Office token can join the `office` room.
-- Rider token can join only their rider room and assigned active order rooms.
-- Client token can join only their client room and own order rooms.
-
-### Acceptance Check
-
-- Office, rider, and client receive valid tokens.
-- Wrong-role users cannot request rooms they do not own.
-- Expired tokens are rejected by the socket server.
-
-## Phase 4. Laravel Event Publishing
-
-### Required Events
-
-Publish events after these Laravel actions succeed:
-
-- Delivery request created
-- Delivery request updated
-- Delivery request deleted/cancelled
-- Office approves/reviews order
-- Rider assigned or changed
-- Rider accepts job
-- Rider progresses status
-- Rider completes delivery
-- Payment screenshot uploaded
-- Payment approved/rejected
-- Cash collection created/updated/confirmed
-- Notification created
-- Rider GPS location updated
-
-### Suggested Event Types
-
-| Laravel action | Socket event type |
-| --- | --- |
-| Order created | `order.created` |
-| Order updated | `order.updated` |
-| Rider assigned | `order.assigned` |
-| Status changed | `order.status.updated` |
-| Payment changed | `payment.updated` |
-| Cash collection changed | `cash.collection.updated` |
-| Notification created | `notification.created` |
-| Rider location changed | `rider.location.updated` |
-
-### Acceptance Check
-
-- Office receives new/updated order events.
-- Rider receives assignment/status events for their jobs.
-- Client receives events for their own orders only.
-- Cash collection and report screens can refresh after related events.
-
-## Phase 5. Frontend Socket Client
-
-### Required
-
-- Install `socket.io-client` in the Laravel frontend app.
-- Add a small realtime client module, for example `resources/js/realtime.js`.
-- Fetch `/api/realtime/token` after login/session load.
-- Connect to `SOCKET_SERVER_URL`.
-- Listen for:
-  - `socket:ready`
-  - `order:created`
-  - `order:updated`
-  - `order:assigned`
-  - `order:status-updated`
-  - `cash-collection:updated`
-  - `rider:location-updated`
-  - `notification:created`
-- Refetch affected API data after important events.
-- Show a quiet offline/reconnecting state only when useful.
-
-### Acceptance Check
-
-- Office order table updates without page refresh.
-- Rider receives assigned job without page refresh.
-- Client tracking status updates without page refresh.
-- App continues working if websocket connection fails.
-
-## Phase 6. Rider Location Capture
-
-### Required
-
-- Add rider location tracking UI permission flow.
-- Use browser Geolocation API in rider portal.
-- Only track when:
-  - rider is logged in
-  - rider has active assigned job, or rider manually enables duty tracking
-- Send location to Laravel API at a safe interval, for example 15-30 seconds during active job.
-- Store:
-  - rider id
-  - latitude
-  - longitude
+- Set rider status to `available` or `online`.
+- Request GPS permission if not already granted.
+- Start location watcher.
+- Start socket connection if not already connected.
+- Show GPS status card:
+  - permission state
+  - tracking state
+  - last sent location time
   - accuracy
-  - heading
+  - network status
+
+### Stop Active
+
+When rider taps **Stop active**:
+
+- Set rider status to `offline`.
+- Stop browser watcher.
+- Stop sending location updates.
+- Keep delivery workflow usable if there is an active order, but warn office if GPS is off.
+
+## Recommended Location Update Strategy
+
+For around 200 riders, use adaptive tracking instead of a fixed very-fast interval.
+
+### Default Working-Hours Tracking
+
+- Send every 15 seconds when moving.
+- Send every 45-60 seconds when stationary.
+- Always send immediately when:
+  - rider taps Start active
+  - rider accepts assignment
+  - order status changes to picked up
+  - order status changes to delivered/completed
+  - app returns from background to foreground
+
+### Movement Threshold
+
+Only send if one of these is true:
+
+- moved at least 15 meters
+- heading changed meaningfully
+- speed changed meaningfully
+- last successful send is older than the max interval
+
+### Accuracy And Battery Tradeoff
+
+Use balanced mode:
+
+- `enableHighAccuracy: true` for active delivery and first fix.
+- Use normal accuracy when rider is online but stationary or waiting.
+- Reject or mark poor-quality fixes when accuracy is worse than 100 meters.
+- Keep stale marker logic instead of over-polling.
+
+Expected load at 200 riders:
+
+- 15 second interval while moving = about 13-14 updates per second if all riders move.
+- With movement threshold and stationary throttling, expected normal load should be lower.
+- This is reasonable for Laravel + MySQL if writes are indexed and payloads are small.
+
+## Phase 1. Rider GPS Page Activation
+
+### Backend
+
+- Add rider duty endpoints:
+  - `POST /api/riders/{rider}/start-active`
+  - `POST /api/riders/{rider}/stop-active`
+- Update rider status and `last_active_at`.
+- Return rider profile and latest location.
+- Keep authorization strict:
+  - rider can only start/stop own rider profile
+  - office can override status if needed
+
+### Frontend
+
+- Replace rider GPS placeholder with real controls:
+  - Start active
+  - Stop active
+  - GPS permission state
+  - live latitude/longitude
+  - accuracy
   - speed
-  - battery info if available
-  - captured timestamp
-- Publish `rider.location.updated` after Laravel saves location.
+  - last sent time
+  - warning banner if GPS denied/unavailable
+- Continue delivery workflow even if GPS fails.
 
-### Acceptance Check
+### Acceptance
 
-- Rider can allow/deny location permission.
-- Location is stored only for authenticated rider.
-- Rider cannot update another rider's location.
-- Office receives realtime rider location updates.
+- Rider can start active.
+- Rider status changes to online/available.
+- Browser asks for GPS permission.
+- Denied GPS shows warning but does not block the app.
+- Location updates are sent while active.
 
-## Phase 7. Realtime Office Map
+## Phase 2. PWA Rider App
 
 ### Required
 
-- Choose map provider:
-  - Leaflet + OpenStreetMap for lower cost/simple setup
-  - Google Maps for commercial-grade search/routing
-  - Mapbox if custom styling is important
-- Replace static office map preview with real map component.
-- Show active riders as markers.
-- Marker popup should show:
+- Add web app manifest.
+- Add service worker.
+- Make rider app installable.
+- Add app icons and splash-safe theme colors.
+- Cache core rider app shell.
+- Add offline indicator.
+- Queue unsent location updates locally when network is offline.
+
+### Offline Queue
+
+Use IndexedDB or a small local queue for:
+
+- last known location
+- unsent location payloads
+- send retry count
+- created timestamp
+
+Flush queue when:
+
+- network returns
+- app opens
+- rider taps Start active
+- socket reconnects
+
+### Acceptance
+
+- Rider can install app on supported mobile browsers.
+- Rider app opens with cached shell when network is unstable.
+- Location sends resume after connection returns.
+- App clearly shows when updates are queued.
+
+## Phase 3. Location Ingestion API Hardening
+
+### Current Endpoint
+
+Continue using:
+
+- `POST /api/riders/{rider}/locations`
+
+### Add Validation
+
+Store:
+
+- `rider_id`
+- `delivery_order_id` nullable
+- `latitude`
+- `longitude`
+- `accuracy`
+- `speed`
+- `heading`
+- `battery_percent`
+- `recorded_at`
+- `source` such as `browser`, `pwa`, `native`
+
+### Add Server Rules
+
+- Rider can only update own location.
+- Office/admin cannot spoof rider location through normal UI.
+- Reject impossible coordinates.
+- Reject very old timestamps.
+- Rate-limit per rider.
+- Deduplicate same position/time payloads.
+- Mark stale if no update for more than 2 minutes.
+
+### Database
+
+Recommended indexes:
+
+- `rider_locations(rider_id, recorded_at)`
+- `rider_locations(delivery_order_id, recorded_at)`
+- `riders(status, last_active_at)`
+
+### Acceptance
+
+- 200 active riders can send updates without noticeable app slowdown.
+- Invalid or unauthorized location updates are rejected.
+- Duplicate updates do not spam socket events.
+
+## Phase 4. Realtime Socket Authorization And Rooms
+
+### Rooms
+
+- `office`: office sees all active riders.
+- `rider:{riderId}`: rider receives own assignment/status events.
+- `order:{orderId}`: client and assigned rider can receive allowed order events.
+- `client:{userId}`: client account events.
+
+### Location Event Rules
+
+Office receives:
+
+- all online rider location events
+- rider status change events
+
+Rider receives:
+
+- own tracking acknowledgment
+- own assignment/order events
+
+Client receives rider location only when:
+
+- order belongs to that client
+- rider is assigned
+- order status is `picked_up`, `delivered`, or another in-transit status before completion
+- order is not completed/cancelled/failed
+
+### Acceptance
+
+- Client cannot subscribe to another order.
+- Office sees all working riders.
+- Rider cannot publish fake events directly to socket server.
+- Laravel remains source of truth.
+
+## Phase 5. Office Live Map
+
+### Scope
+
+Office map shows all online/working riders, not only assigned riders.
+
+### Required UI
+
+- Real map provider:
+  - Leaflet + OpenStreetMap for first cost-effective version
+  - Google Maps or Mapbox later if routing/geocoding quality is needed
+- Rider markers:
   - rider name
   - status
   - active order count
-  - last location timestamp
-- Show stale marker state when location is old, for example older than 2 minutes.
-- Allow clicking a rider marker to filter/open assigned orders.
+  - last update time
+  - GPS accuracy
+  - stale/online indicator
+- Search/filter:
+  - rider name
+  - status
+  - area
+  - active assignment
+- Click marker to open rider detail or assigned orders.
 
-### Acceptance Check
+### Stale Logic
 
-- Office map renders active rider markers.
-- Rider marker moves when location event arrives.
-- Stale rider location is visually clear.
-- Map still loads with no active riders.
+- Fresh: updated within 30 seconds.
+- Warning: updated 31-120 seconds ago.
+- Stale: older than 2 minutes.
+- Offline: rider stopped active or no update for configured timeout.
 
-## Phase 8. Client Tracking Map
+### Acceptance
 
-### Required
+- Office sees all active riders on one map.
+- Marker moves without page refresh.
+- Stale riders are visually clear.
+- Map remains useful with 0 riders or missing GPS permission.
 
-- Replace client static tracking map with real status map.
-- Show pickup and delivery points if geocoded coordinates exist.
-- Show rider marker only after rider is assigned and location is available.
-- Hide exact rider location after order is completed/cancelled.
-- Show text fallback when coordinates are missing.
+## Phase 6. Client Live Tracking
 
-### Acceptance Check
+### Visibility Rule
 
-- Client can see assigned rider movement for their own active order.
-- Client cannot subscribe to another client's order room.
-- Completed delivery stops showing live rider movement.
+Client sees rider live position only after product pickup.
 
-## Phase 9. Coordinate and Geocoding Model
+Recommended statuses:
 
-### Required
+- Hide live rider marker:
+  - pending
+  - rider_assigned
+  - rider_accepted
+- Show live rider marker:
+  - picked_up
+  - delivered if confirmation is still pending
+- Stop showing live rider marker:
+  - completed
+  - failed
+  - cancelled
 
-- Add optional coordinates to pickup and receiver addresses:
-  - pickup latitude/longitude
-  - delivery latitude/longitude
-- Add UI to set coordinates later through map pin or geocoding.
-- Avoid blocking order creation when coordinates are absent.
-- Keep address text as the required source of truth.
+### UI
 
-### Acceptance Check
+- Client tracking page shows:
+  - order status timeline
+  - assigned rider name
+  - live rider marker after pickup
+  - last updated time
+  - fallback text if GPS unavailable
 
-- Existing orders without coordinates still work.
-- New orders can store coordinates when available.
-- Map components gracefully handle missing coordinates.
+### Acceptance
 
-## Phase 10. Push Notification Preparation
+- Client can only see own assigned order rider.
+- Rider location appears only after pickup.
+- Completed/cancelled orders stop showing live rider position.
 
-### Required
+## Phase 7. App-Entry Tracking Strategy
 
-- Keep websocket for active in-app realtime updates.
-- Prepare Firebase Cloud Messaging for background/offline push later.
-- Add future data model:
-  - user id
-  - device token
-  - platform
-  - last used timestamp
-- Decide which events deserve push notifications:
-  - rider assignment
-  - order approved/rejected
-  - delivery completed
-  - payment approved/rejected
-  - urgent delivery issue
+### Browser/PWA Version
 
-### Acceptance Check
+Use this for the current operation:
 
-- Realtime websocket flow remains separate from FCM.
-- Push notifications are not required for websocket map tracking.
+- Tracking works best while app is open/foreground.
+- PWA installation improves launch and persistence.
+- Queue and flush location updates when network drops.
+- On visibility change, page focus, app open, or network return, immediately request/send current position.
+- Restart the browser GPS watcher when the rider re-enters the app if the browser has paused it.
+- Show warning if GPS permission is denied or the browser cannot provide a current position.
+- Accept that live position can become stale while the rider stays outside the app for too long.
 
-## Security Checklist
+### Operational Rule
 
-- Use HTTPS/WSS in production.
-- Disable unsigned socket auth in production.
-- Use short-lived socket tokens.
-- Never trust client-provided room ids without Laravel authorization.
-- Do not expose internal publish API publicly without firewall/API key protection.
-- Rate limit publish endpoints.
-- Validate event payload shape.
-- Log suspicious auth failures.
+All-day background GPS is not required for the current workflow because riders are expected to enter the app frequently during working hours.
 
-## Deployment Checklist
+If the business process changes later and riders stop opening the app frequently, reassess a native wrapper such as Capacitor with platform background-location support.
 
-- Run Laravel app separately.
-- Run Node socket server separately.
-- Use process manager for socket server.
-- Put socket server behind reverse proxy if needed.
-- Use `wss://` endpoint in production.
-- Configure allowed CORS origins.
-- Monitor:
-  - active sockets
-  - event publish failures
-  - connection errors
-  - location update volume
+### Acceptance
+
+- PWA version is honest about foreground/app-entry tracking.
+- Rider app sends a fresh GPS point whenever the rider opens or returns to the app.
+- Queued updates flush when the app reconnects or returns to the foreground.
+- Laravel backend does not care whether source is browser, PWA, or a future native wrapper.
+
+## Phase 8. Monitoring And Operations
+
+### Metrics
+
+Track:
+
+- active riders
+- updates per minute
+- average GPS accuracy
+- stale rider count
+- socket connected clients
+- socket publish failures
+- location API validation failures
+- offline queued update count
+
+### Logs
+
+Log:
+
+- start active
+- stop active
+- GPS denied
+- stale rider detected
+- abnormal update frequency
+- socket publish failure
+
+### Office Alerts
+
+Show alerts for:
+
+- rider online but GPS denied
+- active delivery with stale rider GPS
+- rider has not updated location for more than 2 minutes
+- location accuracy is poor for repeated updates
+
+## Phase 9. Privacy And Compliance
+
+### Required Product Rules
+
+- Rider must visibly know when location tracking is active.
+- Tracking starts only after rider action or explicit office process.
+- Tracking stops when rider stops active/offline.
+- Client only sees rider after pickup.
+- Do not expose all rider locations to clients.
+- Keep current-position use limited to operations.
+
+### Data Retention
+
+Because only live current position is required:
+
+- Keep detailed `rider_locations` for a short operational retention window.
+- Suggested first policy: 7-14 days.
+- Keep only latest location on `riders` table later if storage volume becomes high.
+- Add pruning command:
+  - `php artisan rider-locations:prune`
+
+## Phase 10. Testing Plan
+
+### Backend Tests
+
+- Rider can start active.
+- Rider can stop active.
+- Rider can update own location.
+- Rider cannot update another rider location.
+- GPS denied state does not block delivery workflow.
+- Client cannot access another order location.
+- Client sees rider location only after pickup.
+- Office can see all online riders.
+
+### Frontend Tests
+
+- Rider GPS permission allowed.
+- Rider GPS permission denied.
+- Offline queue and reconnect.
+- Office map marker update.
+- Client tracking marker hidden before pickup.
+- Client tracking marker visible after pickup.
+- Stale marker display.
+
+### Load Tests
+
+Simulate:
+
+- 200 riders online
+- update every 15 seconds
+- socket broadcast to office dashboard
+- multiple client tracking pages
+
+Target:
+
+- no request backlog
+- no database lock issues
+- no visible frontend map lag
 
 ## Suggested Implementation Order
 
-1. Finish and verify standalone socket server install/start.
-2. Add Laravel `RealtimeEventPublisher` with feature flag and safe failure behavior.
-3. Add Laravel `/api/realtime/token`.
-4. Publish order assignment and status update events.
-5. Add frontend socket client and refetch-on-event behavior.
-6. Add rider geolocation capture and API save.
-7. Add office realtime map.
-8. Add client order tracking map.
-9. Add coordinate/geocoding improvements.
-10. Add FCM push notification support later.
+1. Activate rider GPS page with Start active / Stop active.
+2. Harden location API validation and indexes.
+3. Add adaptive browser location watcher and send interval.
+4. Add PWA manifest, service worker, install prompt, and offline queue.
+5. Add office live map showing all online riders.
+6. Add socket room authorization for office, rider, and client map events.
+7. Add client live tracking after pickup only.
+8. Add stale GPS alerts for office.
+9. Add monitoring/logging for 200-rider operation.
+10. Review native wrapper only if app-entry tracking is not enough for operations.
 
-## Out of Scope for First Realtime Release
+## First Build Milestone
 
-- Automatic rider assignment
-- Distance-based fee calculation
-- Route optimization
-- Turn-by-turn navigation
-- Offline map caching
-- Advanced fleet analytics
-- Push notification delivery guarantees
+The first useful milestone should be:
+
+- Rider can tap Start active.
+- Rider app sends current GPS every 15-60 seconds depending on movement.
+- Office map shows all active riders.
+- Client tracking shows assigned rider only after pickup.
+- GPS denied shows warning and workflow continues.
+- PWA install works, with offline queueing.
+
+## Out Of Scope For First GPS Release
+
+- Route optimization.
+- Turn-by-turn navigation.
+- Automatic nearest-rider assignment.
+- Long-term route replay.
+- Geofencing alerts.
+- Proof-of-arrival automation.
+- Exact ETA engine.
+- Native app background service.
+
+The current operating model does not require an all-day native background service. Revisit it only if riders no longer open the app frequently enough during working hours.

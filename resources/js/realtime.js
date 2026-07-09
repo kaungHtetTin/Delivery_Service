@@ -13,7 +13,7 @@ const realtimeEvents = [
   "notification:created",
 ];
 
-export function createRealtimeConnection({ auth, orders = [], riders = [], onRefresh }) {
+export function createRealtimeConnection({ auth, orders = [], riders = [], onRefresh, socketToken = "" }) {
   const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:4100";
   const enabled = import.meta.env.VITE_SOCKET_ENABLED !== "false";
   const socketAuth = buildSocketAuth(auth, orders, riders);
@@ -41,10 +41,11 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
     userId: socketAuth.userId,
     riderId: socketAuth.riderId,
     orderCount: socketAuth.orderIds.length,
+    signed: Boolean(socketToken),
   });
 
   const socket = io(socketUrl, {
-    auth: socketAuth,
+    auth: socketToken ? { token: socketToken } : socketAuth,
     transports: ["websocket", "polling"],
     reconnectionAttempts: 10,
     reconnectionDelay: 1000,

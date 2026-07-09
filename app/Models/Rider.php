@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Model;
 
 class Rider extends Model
@@ -43,6 +44,11 @@ class Rider extends Model
     public function locations(): HasMany
     {
         return $this->hasMany(RiderLocation::class);
+    }
+
+    public function latestLocation(): HasOne
+    {
+        return $this->hasOne(RiderLocation::class)->latestOfMany('recorded_at');
     }
 
     public function cashCollections(): HasMany

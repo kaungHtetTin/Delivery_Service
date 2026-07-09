@@ -34,7 +34,13 @@ return [
         'enabled' => env('SOCKET_SERVER_ENABLED', true),
         'url' => env('SOCKET_SERVER_URL', 'http://127.0.0.1:4100'),
         'key' => env('SOCKET_SERVER_KEY', env('INTERNAL_API_KEY')),
+        'auth_secret' => env('SOCKET_AUTH_SECRET'),
+        'token_ttl' => env('SOCKET_AUTH_TOKEN_TTL', 3600),
         'timeout' => env('SOCKET_SERVER_TIMEOUT', 2),
+    ],
+
+    'live_tracking' => [
+        'location_retention_days' => env('RIDER_LOCATION_RETENTION_DAYS', 14),
     ],
 
 ];

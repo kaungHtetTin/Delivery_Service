@@ -297,6 +297,12 @@ class DeliveryOrderApiTest extends TestCase
             'cod_amount' => 0,
             'rider_id' => $rider->id,
         ]));
+        $rider->locations()->create([
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 24,
+            'recorded_at' => now(),
+        ]);
 
         $this->patchJson("/api/delivery-orders/{$order->id}/status", [
             'status' => 'picked_up',
@@ -312,7 +318,8 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonPath('receiver_phone', '09 555 222 777')
             ->assertJsonPath('receiver_address', 'Bahan Street, Yangon')
             ->assertJsonPath('product_payment_method', 'rider_collects')
-            ->assertJsonPath('cod_amount', '12500.00');
+            ->assertJsonPath('cod_amount', '12500.00')
+            ->assertJsonPath('rider.latest_location.latitude', '16.8409390');
 
         $this->assertDatabaseHas('delivery_orders', [
             'id' => $order->id,
@@ -394,16 +401,388 @@ class DeliveryOrderApiTest extends TestCase
             'user_id' => $user->id,
         ]);
 
+        $this->postJson("/api/riders/{$rider->id}/start-active")
+            ->assertOk()
+            ->assertJsonPath('status', 'available');
+
         $this->postJson("/api/riders/{$rider->id}/locations", [
             'latitude' => 16.840939,
             'longitude' => 96.173526,
+            'heading' => 82.5,
             'battery_percent' => 84,
-        ])->assertCreated()->assertJsonPath('battery_percent', 84);
+            'source' => 'browser',
+        ])->assertCreated()
+            ->assertJsonPath('battery_percent', 84)
+            ->assertJsonPath('freshness', 'fresh')
+            ->assertJsonPath('is_stale', false)
+            ->assertJsonPath('source', 'browser');
 
         $this->assertDatabaseHas('riders', [
             'id' => $rider->id,
-            'status' => 'online',
+            'status' => 'available',
         ]);
+        $this->assertDatabaseHas('rider_locations', [
+            'rider_id' => $rider->id,
+            'source' => 'browser',
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/stop-active")
+            ->assertOk()
+            ->assertJsonPath('status', 'offline');
+    }
+
+    public function test_rider_location_ingestion_rejects_stale_or_future_timestamps()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'user_id' => $user->id,
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'recorded_at' => now()->subMinutes(16)->toIso8601String(),
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('recorded_at');
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'recorded_at' => now()->addMinutes(3)->toIso8601String(),
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('recorded_at');
+    }
+
+    public function test_rider_can_report_gps_operational_event()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'user_id' => $user->id,
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/gps-events", [
+            'event' => 'permission_denied',
+            'message' => 'Location permission was denied.',
+            'permission' => 'denied',
+            'tracking_state' => 'warning',
+            'queued_count' => 2,
+        ])->assertOk()
+            ->assertJsonPath('message', 'GPS event recorded.');
+
+        $this->assertDatabaseHas('admin_logs', [
+            'action' => 'rider_gps_permission_denied',
+            'subject_type' => Rider::class,
+            'subject_id' => $rider->id,
+            'actor_type' => 'rider',
+            'actor_id' => $user->id,
+            'note' => 'Location permission was denied.',
+        ]);
+    }
+
+    public function test_rider_location_prune_removes_old_operational_points()
+    {
+        config()->set('services.live_tracking.location_retention_days', 14);
+
+        $rider = $this->createRider([
+            'code' => 'R-GPS-PRUNE',
+            'phone' => '09 710 100 099',
+        ]);
+        $oldLocation = $rider->locations()->create([
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'recorded_at' => now()->subDays(20),
+        ]);
+        $recentLocation = $rider->locations()->create([
+            'latitude' => 16.841111,
+            'longitude' => 96.174111,
+            'recorded_at' => now()->subDays(3),
+        ]);
+
+        $this->artisan('rider-locations:prune --dry-run')
+            ->expectsOutput('1 rider location record(s) older than 14 day(s) would be pruned.')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseHas('rider_locations', ['id' => $oldLocation->id]);
+
+        $this->artisan('rider-locations:prune')
+            ->expectsOutput('Pruned 1 rider location record(s) older than 14 day(s).')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseMissing('rider_locations', ['id' => $oldLocation->id]);
+        $this->assertDatabaseHas('rider_locations', ['id' => $recentLocation->id]);
+    }
+
+    public function test_rider_location_ingestion_deduplicates_exact_position_time_payloads()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'user_id' => $user->id,
+        ]);
+        $payload = [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 25,
+            'recorded_at' => now()->toIso8601String(),
+        ];
+
+        $this->postJson("/api/riders/{$rider->id}/locations", $payload)
+            ->assertCreated();
+
+        $this->postJson("/api/riders/{$rider->id}/locations", $payload)
+            ->assertOk();
+
+        $this->assertSame(1, $rider->locations()->count());
+    }
+
+    public function test_rider_location_can_only_reference_that_riders_active_order()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'code' => 'R-GPS-OWN',
+            'phone' => '09 111 222 401',
+            'user_id' => $user->id,
+        ]);
+        $otherRider = $this->createRider([
+            'code' => 'R-GPS-OTHER',
+            'phone' => '09 111 222 402',
+        ]);
+        $otherOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'picked_up',
+            'rider_id' => $otherRider->id,
+        ]);
+        $completedOwnOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'completed',
+            'rider_id' => $rider->id,
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'delivery_order_id' => $otherOrder->id,
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('delivery_order_id');
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'delivery_order_id' => $completedOwnOrder->id,
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('delivery_order_id', null);
+    }
+
+    public function test_rider_location_without_order_id_links_to_current_picked_up_order()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'code' => 'R-GPS-AUTO',
+            'phone' => '09 111 222 411',
+            'status' => 'busy',
+            'user_id' => $user->id,
+        ]);
+        $order = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'picked_up',
+            'rider_id' => $rider->id,
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 25,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('delivery_order_id', $order->id);
+    }
+
+    public function test_duplicate_rider_location_is_linked_after_order_pickup()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+
+        $rider = $this->createRider([
+            'code' => 'R-GPS-DUP',
+            'phone' => '09 111 222 412',
+            'status' => 'busy',
+            'user_id' => $user->id,
+        ]);
+        $recordedAt = now()->toIso8601String();
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 25,
+            'recorded_at' => $recordedAt,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('delivery_order_id', null);
+
+        $order = DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'picked_up',
+            'rider_id' => $rider->id,
+        ]);
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 25,
+            'recorded_at' => $recordedAt,
+        ])
+            ->assertOk()
+            ->assertJsonPath('delivery_order_id', $order->id);
+
+        $this->assertSame(1, $rider->locations()->count());
+        $this->assertDatabaseHas('rider_locations', [
+            'rider_id' => $rider->id,
+            'delivery_order_id' => $order->id,
+        ]);
+    }
+
+    public function test_client_order_tracking_sees_rider_location_only_after_pickup()
+    {
+        $client = $this->createUser([
+            'email' => 'tracking-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $rider = $this->createRider([
+            'code' => 'R-CLIENT-GPS',
+            'phone' => '09 111 222 410',
+            'status' => 'busy',
+        ]);
+        $rider->locations()->create([
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 24,
+            'recorded_at' => now(),
+        ]);
+
+        DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'rider_id' => $rider->id,
+            'status' => 'rider_accepted',
+        ]);
+        DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'rider_id' => $rider->id,
+            'status' => 'picked_up',
+        ]);
+
+        Sanctum::actingAs($client);
+
+        $beforePickup = $this->getJson('/api/delivery-orders?status=rider_accepted')
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+
+        $this->assertNull($beforePickup->json('data.0.rider.latest_location'));
+
+        $afterPickup = $this->getJson('/api/delivery-orders?status=picked_up')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.rider.latest_location.freshness', 'fresh');
+
+        $this->assertArrayNotHasKey('name', $afterPickup->json('data.0.rider'));
+        $this->assertArrayNotHasKey('phone', $afterPickup->json('data.0.rider'));
+        $this->assertNotNull($afterPickup->json('data.0.rider.latest_location.latitude'));
+    }
+
+    public function test_client_order_tracking_keeps_location_when_same_rider_has_hidden_orders()
+    {
+        $client = $this->createUser([
+            'email' => 'tracking-shared-rider@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $rider = $this->createRider([
+            'code' => 'R-SHARED-GPS',
+            'phone' => '09 111 222 413',
+            'status' => 'busy',
+        ]);
+        $rider->locations()->create([
+            'latitude' => 16.948389,
+            'longitude' => 96.127206,
+            'accuracy' => 24,
+            'recorded_at' => now(),
+        ]);
+
+        $pickedUpOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'rider_id' => $rider->id,
+            'status' => 'picked_up',
+        ]);
+        $hiddenOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'rider_id' => $rider->id,
+            'status' => 'completed',
+        ]);
+        $hiddenOrder->forceFill(['created_at' => now()->addMinute()])->save();
+
+        Sanctum::actingAs($client);
+
+        $orders = collect($this->getJson('/api/delivery-orders')
+            ->assertOk()
+            ->json('data'));
+
+        $this->assertNull($orders->firstWhere('id', $hiddenOrder->id)['rider']['latest_location'] ?? null);
+        $this->assertNotNull($orders->firstWhere('id', $pickedUpOrder->id)['rider']['latest_location']['latitude'] ?? null);
+    }
+
+    public function test_client_receives_signed_realtime_token_scoped_to_own_active_orders()
+    {
+        config()->set('services.socket_server.auth_secret', 'test-socket-secret');
+
+        $client = $this->createUser([
+            'email' => 'socket-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $ownOrder = DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'status' => 'picked_up',
+        ]);
+        DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'status' => 'completed',
+        ]);
+        DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'picked_up',
+        ]);
+
+        Sanctum::actingAs($client);
+
+        $response = $this->getJson('/api/realtime/token')
+            ->assertOk()
+            ->assertJsonPath('payload.role', 'client')
+            ->assertJsonPath('payload.userId', (string) $client->id)
+            ->assertJsonPath('payload.orderIds', [(string) $ownOrder->id]);
+
+        [$encodedPayload, $signature] = explode('.', $response->json('token'));
+
+        $this->assertSame(
+            $this->base64UrlEncode(hash_hmac('sha256', $encodedPayload, 'test-socket-secret', true)),
+            $signature
+        );
+
+        $signedPayload = json_decode($this->base64UrlDecode($encodedPayload), true);
+
+        $this->assertSame('client', $signedPayload['role']);
+        $this->assertContains((string) $ownOrder->id, $signedPayload['orderIds']);
+        $this->assertArrayHasKey('exp', $signedPayload);
+    }
+
+    public function test_office_cannot_spoof_rider_location()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $rider = $this->createRider();
+
+        $this->postJson("/api/riders/{$rider->id}/locations", [
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+        ])->assertForbidden();
     }
 
     public function test_rider_only_sees_and_updates_their_own_profile()
@@ -433,6 +812,8 @@ class DeliveryOrderApiTest extends TestCase
             'latitude' => 16.840939,
             'longitude' => 96.173526,
         ])->assertForbidden();
+        $this->postJson("/api/riders/{$otherRider->id}/start-active")
+            ->assertForbidden();
 
         $this->postJson("/api/riders/{$ownRider->id}/locations", [
             'latitude' => 16.840939,
@@ -618,6 +999,98 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonPath('delivery_fees.rider_collected', 5000)
             ->assertJsonPath('delivery_fees.records', 2)
             ->assertJsonCount(2, 'riders');
+    }
+
+    public function test_office_reports_include_gps_monitoring_metrics_and_alerts()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $freshRider = $this->createRider([
+            'code' => 'R-GPS-FRESH',
+            'phone' => '09 710 100 001',
+            'status' => 'available',
+        ]);
+        $freshRider->locations()->create([
+            'latitude' => 16.840939,
+            'longitude' => 96.173526,
+            'accuracy' => 30,
+            'recorded_at' => now()->subSeconds(20),
+        ]);
+
+        $staleRider = $this->createRider([
+            'code' => 'R-GPS-STALE',
+            'phone' => '09 710 100 002',
+            'status' => 'busy',
+        ]);
+        $staleRider->locations()->create([
+            'latitude' => 16.841111,
+            'longitude' => 96.174111,
+            'accuracy' => 150,
+            'recorded_at' => now()->subMinutes(3),
+        ]);
+        DeliveryOrder::create($this->validOrderPayload() + [
+            'status' => 'picked_up',
+            'rider_id' => $staleRider->id,
+        ]);
+
+        $noGpsRider = $this->createRider([
+            'code' => 'R-GPS-NONE',
+            'phone' => '09 710 100 003',
+            'status' => 'online',
+        ]);
+        AdminLog::create([
+            'action' => 'rider_gps_permission_denied',
+            'subject_type' => Rider::class,
+            'subject_id' => $noGpsRider->id,
+            'actor_type' => 'rider',
+            'metadata' => ['permission' => 'denied'],
+            'note' => 'Location permission was denied.',
+        ]);
+
+        $response = $this->getJson('/api/reports/summary')
+            ->assertOk()
+            ->assertJsonPath('gps.active_riders', 3)
+            ->assertJsonPath('gps.fresh_riders', 1)
+            ->assertJsonPath('gps.stale_riders', 1)
+            ->assertJsonPath('gps.no_gps_riders', 1)
+            ->assertJsonPath('gps.poor_accuracy_riders', 1)
+            ->assertJsonPath('gps.updates_last_minute', 1);
+
+        $alerts = collect($response->json('gps_alerts'));
+
+        $this->assertTrue($alerts->contains(fn ($alert) => $alert['type'] === 'stale' && $alert['severity'] === 'danger'));
+        $this->assertTrue($alerts->contains(fn ($alert) => $alert['type'] === 'no_gps'));
+        $this->assertTrue($alerts->contains(fn ($alert) => $alert['type'] === 'rider_gps_permission_denied'));
+    }
+
+    public function test_office_reports_handle_two_hundred_active_rider_locations()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        for ($index = 1; $index <= 200; $index++) {
+            $rider = $this->createRider([
+                'code' => 'R-LOAD-' . str_pad((string) $index, 3, '0', STR_PAD_LEFT),
+                'name' => "Load Rider {$index}",
+                'phone' => '09 710 ' . str_pad((string) $index, 3, '0', STR_PAD_LEFT) . ' 200',
+                'status' => 'available',
+            ]);
+            $rider->locations()->create([
+                'latitude' => 16.800000 + ($index / 100000),
+                'longitude' => 96.100000 + ($index / 100000),
+                'accuracy' => 35,
+                'recorded_at' => now(),
+            ]);
+        }
+
+        $this->getJson('/api/reports/summary')
+            ->assertOk()
+            ->assertJsonPath('gps.active_riders', 200)
+            ->assertJsonPath('gps.fresh_riders', 200)
+            ->assertJsonPath('gps.warning_riders', 0)
+            ->assertJsonPath('gps.stale_riders', 0)
+            ->assertJsonPath('gps.no_gps_riders', 0)
+            ->assertJsonPath('gps.updates_last_minute', 200)
+            ->assertJsonCount(200, 'riders');
     }
 
     public function test_office_can_view_admin_logs()
@@ -1709,5 +2182,15 @@ class DeliveryOrderApiTest extends TestCase
         );
 
         return new UploadedFile($path, 'proof.png', 'image/png', null, true);
+    }
+
+    private function base64UrlEncode(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    private function base64UrlDecode(string $value): string
+    {
+        return base64_decode(strtr($value, '-_', '+/'));
     }
 }

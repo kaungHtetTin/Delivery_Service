@@ -40,6 +40,10 @@ export function normalizeDomainEvent(payload = {}) {
 }
 
 function resolveRooms(event) {
+  if (event.type === "rider.location.updated" || event.name === "rider:location-updated") {
+    return resolveRiderLocationRooms(event);
+  }
+
   const rooms = new Set();
   const data = event.data || {};
   const recipients = event.recipients || {};
@@ -58,6 +62,29 @@ function resolveRooms(event) {
       rooms.add(String(room));
     }
   });
+
+  return [...rooms];
+}
+
+function resolveRiderLocationRooms(event) {
+  const rooms = new Set();
+  const data = event.data || {};
+  const recipients = event.recipients || {};
+  const riderId = recipients.riderId || recipients.rider_id || data.riderId || data.rider_id;
+  const orderId = resolveOrderId(event);
+  const clientUserId = recipients.clientUserId || recipients.client_user_id || data.clientUserId || data.client_user_id;
+  const clientVisible = data.client_tracking_visible === true || recipients.clientTrackingVisible === true || recipients.client_tracking_visible === true;
+
+  if (recipients.office !== false) {
+    rooms.add("office");
+  }
+
+  addRoom(rooms, "rider", riderId);
+
+  if (clientVisible) {
+    addRoom(rooms, "order", orderId);
+    addRoom(rooms, "client", clientUserId);
+  }
 
   return [...rooms];
 }

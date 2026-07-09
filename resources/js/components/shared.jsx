@@ -108,6 +108,10 @@ export function ThemeControl({ theme, setTheme, brand, setBrand }) {
   );
 }
 
+function countBadgeLabel(count) {
+  return count > 99 ? "99+" : String(count);
+}
+
 export function MobileTopbar({ appName, onNotifications, title, themeProps, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
@@ -117,7 +121,7 @@ export function MobileTopbar({ appName, onNotifications, title, themeProps, unre
         <ThemeControl {...themeProps} />
         <button aria-label="Notifications" className="icon-btn notification-btn" onClick={onNotifications} type="button">
           <Icon name="bell" />
-          {unreadCount > 0 && <span />}
+          {unreadCount > 0 && <span>{countBadgeLabel(unreadCount)}</span>}
         </button>
       </div>
     </header>
@@ -127,7 +131,7 @@ export function MobileTopbar({ appName, onNotifications, title, themeProps, unre
 export function MobileNav({ active, onNavigate, items }) {
   return (
     <nav className="mobile-nav glass">
-      {items.map(([value, icon, label, prominent]) => (
+      {items.map(([value, icon, label, prominent, badgeCount = 0]) => (
         <button
           className={`${active === value ? "active" : ""} ${prominent ? "prominent" : ""}`}
           key={value}
@@ -136,6 +140,7 @@ export function MobileNav({ active, onNavigate, items }) {
         >
           <span className="nav-icon">
             <Icon name={icon} size={prominent ? 21 : 18} />
+            {badgeCount > 0 && <span className="nav-badge">{countBadgeLabel(badgeCount)}</span>}
           </span>
           <small>{label}</small>
         </button>

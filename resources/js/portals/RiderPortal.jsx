@@ -1,20 +1,94 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { deliveryFeeCashDue, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { nextRiderActions } from "../data";
 import { AddressBlock, MobileNav, MobilePlaceholder, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
+import { bumpQueuedLocationRetry, countQueuedRiderLocations, enqueueRiderLocation, getQueuedRiderLocations, removeQueuedLocation } from "../offlineLocationQueue";
 
 const historyStatuses = new Set(["completed", "failed", "cancelled"]);
+const dutyActiveStatuses = new Set(["online", "available", "busy"]);
+const gpsLinkedOrderStatuses = new Set([
+  "picked_up",
+  "going_to_delivery",
+  "arrived_at_delivery",
+  "delivered",
+  "rider_accepted",
+  "going_to_pickup",
+  "arrived_at_pickup",
+  "rider_assigned",
+]);
 
-export function RiderPortal({ appName, markNotificationRead, notifications = [], orders, riders, progressOrder, themeProps }) {
+const gpsErrorMessages = {
+  1: "Location permission was denied. You can continue working, but office cannot see your live position.",
+  2: "Location is unavailable right now. Move outside or check GPS/network settings.",
+  3: "Location request timed out. Tracking will retry automatically.",
+};
+
+function distanceMeters(from, to) {
+  if (!from || !to) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const earthRadius = 6371000;
+  const latitudeA = from.latitude * Math.PI / 180;
+  const latitudeB = to.latitude * Math.PI / 180;
+  const deltaLatitude = (to.latitude - from.latitude) * Math.PI / 180;
+  const deltaLongitude = (to.longitude - from.longitude) * Math.PI / 180;
+  const haversine =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(latitudeA) * Math.cos(latitudeB) * Math.sin(deltaLongitude / 2) ** 2;
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+async function getBatteryPercent() {
+  if (!navigator.getBattery) {
+    return null;
+  }
+
+  try {
+    const battery = await navigator.getBattery();
+    return Math.round(battery.level * 100);
+  } catch {
+    return null;
+  }
+}
+
+function shouldDropQueuedLocation(error) {
+  if (error?.response?.status !== 422) {
+    return false;
+  }
+
+  const validationErrors = error?.payload?.errors || {};
+  const discardableFields = ["recorded_at", "delivery_order_id", "latitude", "longitude", "source"];
+
+  return discardableFields.some((field) => validationErrors[field]);
+}
+
+export function RiderPortal({ appName, markNotificationRead, notifications = [], onGpsEvent, onLocation, onStartActive, onStopActive, orders, riders, progressOrder, themeProps }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
-  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  const riderOrders = rider ? orders.filter((order) => order.riderId === rider.id) : [];
+  const activeOrders = riderOrders.filter((order) => !historyStatuses.has(order.status));
+  const historyOrders = riderOrders.filter((order) => historyStatuses.has(order.status));
+  const selectedOrder = riderOrders.find((order) => order.id === selectedId);
+  const incompleteOrderCount = activeOrders.length;
+  const gpsTracking = useRiderGpsTracking({
+    activeOrders,
+    onGpsEvent,
+    onLocation,
+    onStartActive,
+    onStopActive,
+    rider,
+  });
+
   if (!rider) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
+        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={incompleteOrderCount} />
         <main className="mobile-content">
           <MobilePlaceholder icon="bike" title="No rider profile" />
         </main>
@@ -22,19 +96,15 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
     );
   }
 
-  const riderOrders = orders.filter((order) => order.riderId === rider.id);
-  const activeOrders = riderOrders.filter((order) => !historyStatuses.has(order.status));
-  const historyOrders = riderOrders.filter((order) => historyStatuses.has(order.status));
-  const selectedOrder = riderOrders.find((order) => order.id === selectedId);
-
   if (selectedOrder) {
     const isHistory = historyStatuses.has(selectedOrder.status);
 
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
+        <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={incompleteOrderCount} />
         <main className="mobile-content">
           <RiderJobDetail
+            gpsTracking={gpsTracking}
             history={isHistory}
             onBack={() => setSelectedId(null)}
             onComplete={() => {
@@ -50,11 +120,11 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={unreadCount} />
+      <MobileTopbar appName={appName} themeProps={themeProps} unreadCount={incompleteOrderCount} />
       <main className="mobile-content">
-        {page === "jobs" && <RiderJobs onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
+        {page === "jobs" && <RiderJobs gpsTracking={gpsTracking} onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}
-        {page === "gps" && <GpsStatus />}
+        {page === "gps" && <GpsStatus activeOrders={activeOrders} gpsTracking={gpsTracking} rider={rider} />}
         {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
         {page === "account" && <MobilePlaceholder icon="user" title="Rider account" />}
       </main>
@@ -64,7 +134,7 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
           ["jobs", "box", "Jobs"],
           ["history", "clock", "History"],
           ["gps", "location", "GPS"],
-          ["notifications", "bell", "Alerts"],
+          ["notifications", "bell", "Alerts", false, incompleteOrderCount],
           ["account", "user", "Account"],
         ]}
         onNavigate={setPage}
@@ -73,8 +143,468 @@ export function RiderPortal({ appName, markNotificationRead, notifications = [],
   );
 }
 
-function RiderJobs({ onOpen, orders, rider }) {
+function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActive, onStopActive, rider }) {
+  const [permission, setPermission] = useState("unknown");
+  const [trackingState, setTrackingState] = useState("idle");
+  const [message, setMessage] = useState("");
+  const [lastPosition, setLastPosition] = useState(rider?.currentLocation || null);
+  const [lastSentAt, setLastSentAt] = useState(rider?.currentLocation?.recordedAt || "");
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [flushing, setFlushing] = useState(false);
+  const [sending, setSending] = useState(false);
+  const watchIdRef = useRef(null);
+  const lastSentRef = useRef(null);
+  const lastForegroundRefreshRef = useRef(0);
+  const riderRef = useRef(rider);
+  const ordersRef = useRef(activeOrders);
+  const onGpsEventRef = useRef(onGpsEvent);
+  const onLocationRef = useRef(onLocation);
+  const lastGpsEventRef = useRef({});
+  const dutyActive = Boolean(rider && dutyActiveStatuses.has(rider.status));
+
+  useEffect(() => {
+    riderRef.current = rider;
+    ordersRef.current = activeOrders;
+    onGpsEventRef.current = onGpsEvent;
+    onLocationRef.current = onLocation;
+  }, [activeOrders, onGpsEvent, onLocation, rider]);
+
+  useEffect(() => {
+    if (rider?.currentLocation) {
+      setLastPosition(rider.currentLocation);
+      setLastSentAt(rider.currentLocation.recordedAt || "");
+      lastSentRef.current = {
+        latitude: rider.currentLocation.latitude,
+        longitude: rider.currentLocation.longitude,
+        sentAt: rider.currentLocation.recordedAt ? new Date(rider.currentLocation.recordedAt).getTime() : Date.now(),
+      };
+    }
+  }, [rider?.currentLocation]);
+
+  useEffect(() => {
+    if (!navigator.permissions?.query) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let permissionStatus = null;
+
+    navigator.permissions.query({ name: "geolocation" })
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
+
+        permissionStatus = status;
+        setPermission(status.state);
+        status.onchange = () => setPermission(status.state);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      if (permissionStatus) {
+        permissionStatus.onchange = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    refreshQueuedCount();
+  }, [rider?._apiId]);
+
+  const stopWatcher = () => {
+    if (watchIdRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  };
+
+  const refreshQueuedCount = async () => {
+    setQueuedCount(await countQueuedRiderLocations(riderRef.current));
+  };
+
+  const queueLocation = async (payload, queueMessage) => {
+    await enqueueRiderLocation(riderRef.current, payload);
+    await refreshQueuedCount();
+    setTrackingState("warning");
+    setMessage(queueMessage);
+  };
+
+  const reportGpsEvent = async (event, details = {}) => {
+    const activeRider = riderRef.current;
+
+    if (!activeRider?._apiId || !onGpsEventRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastReportedAt = lastGpsEventRef.current[event] || 0;
+
+    if (now - lastReportedAt < 60000) {
+      return;
+    }
+
+    lastGpsEventRef.current[event] = now;
+
+    try {
+      await onGpsEventRef.current(activeRider, {
+        event,
+        message: details.message || message || "",
+        permission: details.permission || permission,
+        trackingState: details.trackingState || trackingState,
+        queuedCount: details.queuedCount ?? queuedCount,
+        accuracy: details.accuracy ?? null,
+        occurredAt: new Date(now).toISOString(),
+      });
+    } catch (error) {
+      console.warn("[gps] event_report_failed", {
+        event,
+        message: error?.message,
+      });
+    }
+  };
+
+  const flushQueuedLocations = async () => {
+    const activeRider = riderRef.current;
+
+    if (!activeRider?._apiId || !onLocationRef.current || !navigator.onLine) {
+      await refreshQueuedCount();
+      return;
+    }
+
+    const queuedLocations = await getQueuedRiderLocations(activeRider);
+
+    if (queuedLocations.length === 0) {
+      setQueuedCount(0);
+      return;
+    }
+
+    setFlushing(true);
+
+    try {
+      for (const record of queuedLocations) {
+        try {
+          await onLocationRef.current(activeRider, record.payload);
+          await removeQueuedLocation(record.id);
+        } catch (error) {
+          if (shouldDropQueuedLocation(error)) {
+            await removeQueuedLocation(record.id);
+            continue;
+          }
+
+          await bumpQueuedLocationRetry(record);
+          break;
+        }
+      }
+    } finally {
+      await refreshQueuedCount();
+      setFlushing(false);
+    }
+  };
+
+  const handleGpsError = (error) => {
+    const nextPermission = error.code === 1 ? "denied" : permission;
+    const eventByCode = {
+      1: "permission_denied",
+      2: "position_unavailable",
+      3: "timeout",
+    };
+    const nextMessage = gpsErrorMessages[error.code] || "Could not read GPS location.";
+
+    setPermission(nextPermission);
+    setTrackingState("warning");
+    setMessage(nextMessage);
+    reportGpsEvent(eventByCode[error.code] || "position_unavailable", {
+      message: nextMessage,
+      permission: nextPermission,
+      trackingState: "warning",
+    });
+  };
+
+  const requestCurrentPosition = () => {
+    if (!navigator.geolocation) {
+      const unsupportedMessage = "This browser does not support GPS tracking.";
+
+      setTrackingState("warning");
+      setMessage(unsupportedMessage);
+      reportGpsEvent("unsupported", {
+        message: unsupportedMessage,
+        trackingState: "warning",
+      });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => sendPosition(position, { force: true }),
+      handleGpsError,
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  };
+
+  const startWatcher = () => {
+    if (!navigator.geolocation) {
+      const unsupportedMessage = "This browser does not support GPS tracking.";
+
+      setTrackingState("warning");
+      setMessage(unsupportedMessage);
+      reportGpsEvent("unsupported", {
+        message: unsupportedMessage,
+        trackingState: "warning",
+      });
+      return;
+    }
+
+    if (watchIdRef.current !== null) {
+      return;
+    }
+
+    setTrackingState("starting");
+    setMessage("");
+    requestCurrentPosition();
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => sendPosition(position),
+      handleGpsError,
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
+    );
+  };
+
+  const resumeForegroundTracking = () => {
+    if (!dutyActive) {
+      refreshQueuedCount();
+      return;
+    }
+
+    const now = Date.now();
+
+    if (now - lastForegroundRefreshRef.current < 3000) {
+      return;
+    }
+
+    lastForegroundRefreshRef.current = now;
+    flushQueuedLocations();
+
+    if (watchIdRef.current === null) {
+      startWatcher();
+      return;
+    }
+
+    requestCurrentPosition();
+  };
+
+  const sendPosition = async (position, { force = false } = {}) => {
+    const activeRider = riderRef.current;
+
+    if (!activeRider?._apiId || !onLocationRef.current) {
+      return;
+    }
+
+    const coords = position.coords;
+    const now = Date.now();
+    const nextPoint = {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    };
+    const lastSent = lastSentRef.current;
+    const distance = distanceMeters(lastSent, nextPoint);
+    const moving = Number(coords.speed || 0) > 0.5 || distance >= 15;
+    const minInterval = moving ? 15000 : 45000;
+    const elapsed = lastSent?.sentAt ? now - lastSent.sentAt : Number.POSITIVE_INFINITY;
+
+    if (!force && lastSent && elapsed < minInterval && distance < 15) {
+      setLastPosition((current) => ({
+        ...current,
+        ...nextPoint,
+        accuracy: coords.accuracy ?? current?.accuracy ?? null,
+        speed: coords.speed ?? current?.speed ?? null,
+        heading: coords.heading ?? current?.heading ?? null,
+      }));
+      return;
+    }
+
+    const activeDelivery = ordersRef.current.find((order) => gpsLinkedOrderStatuses.has(order.status)) || ordersRef.current[0];
+    const recordedAt = new Date(position.timestamp || now).toISOString();
+    const batteryPercent = await getBatteryPercent();
+    const locationPayload = {
+      deliveryOrderApiId: activeDelivery?._apiId || null,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy ?? null,
+      speed: coords.speed ?? null,
+      heading: coords.heading ?? null,
+      batteryPercent,
+      recordedAt,
+      source: "browser",
+    };
+
+    setLastPosition({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy ?? null,
+      speed: coords.speed ?? null,
+      heading: coords.heading ?? null,
+      batteryPercent,
+      recordedAt,
+      source: "browser",
+    });
+
+    if (!navigator.onLine) {
+      lastSentRef.current = {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        sentAt: now,
+      };
+      const queueMessage = "Network is offline. GPS is active and this location was queued.";
+
+      await queueLocation(locationPayload, queueMessage);
+      reportGpsEvent("offline_queued", {
+        message: queueMessage,
+        queuedCount: queuedCount + 1,
+        trackingState: "warning",
+      });
+      return;
+    }
+
+    setSending(true);
+
+    try {
+      await flushQueuedLocations();
+      await onLocationRef.current(activeRider, locationPayload);
+      lastSentRef.current = {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        sentAt: now,
+      };
+      setPermission("granted");
+      setTrackingState(coords.accuracy && coords.accuracy > 100 ? "warning" : "active");
+      setMessage(coords.accuracy && coords.accuracy > 100 ? "GPS accuracy is weak, but tracking is still running." : "");
+      if (coords.accuracy && coords.accuracy > 100) {
+        reportGpsEvent("poor_accuracy", {
+          message: "GPS accuracy is weak, but tracking is still running.",
+          permission: "granted",
+          trackingState: "warning",
+          accuracy: coords.accuracy,
+        });
+      }
+      setLastSentAt(recordedAt);
+    } catch (error) {
+      lastSentRef.current = {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        sentAt: now,
+      };
+      await queueLocation(
+        locationPayload,
+        error?.payload?.message ||
+          Object.values(error?.payload?.errors || {})?.[0]?.[0] ||
+          error?.message ||
+          "Could not send GPS location. This location was queued for retry.",
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!dutyActive) {
+      stopWatcher();
+      setTrackingState("idle");
+      return undefined;
+    }
+
+    startWatcher();
+
+    return stopWatcher;
+  }, [dutyActive, permission, rider?._apiId]);
+
+  useEffect(() => {
+    const handleOnline = () => resumeForegroundTracking();
+    const handleFocus = () => resumeForegroundTracking();
+    const handlePageShow = () => resumeForegroundTracking();
+    const handleVisible = () => {
+      if (document.visibilityState === "visible") {
+        resumeForegroundTracking();
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisible);
+
+    if (dutyActive) {
+      flushQueuedLocations();
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisible);
+    };
+  }, [dutyActive, rider?._apiId]);
+
+  const startDuty = async () => {
+    setTrackingState("starting");
+    setMessage("");
+
+    try {
+      await onStartActive?.(rider);
+      await flushQueuedLocations();
+    } catch (error) {
+      setTrackingState("warning");
+      setMessage(
+        error?.payload?.message ||
+        Object.values(error?.payload?.errors || {})?.[0]?.[0] ||
+        error?.message ||
+        "Could not start active duty.",
+      );
+    }
+  };
+
+  const stopDuty = async () => {
+    stopWatcher();
+    setTrackingState("idle");
+    setMessage("");
+
+    try {
+      await onStopActive?.(rider);
+    } catch (error) {
+      setTrackingState("warning");
+      setMessage(
+        error?.payload?.message ||
+        Object.values(error?.payload?.errors || {})?.[0]?.[0] ||
+        error?.message ||
+        "Could not stop active duty.",
+      );
+    }
+  };
+
+  return {
+    dutyActive,
+    flushing,
+    lastPosition,
+    lastSentAt,
+    message,
+    permission,
+    queuedCount,
+    refreshPosition: requestCurrentPosition,
+    sending,
+    startDuty,
+    stopDuty,
+    trackingState,
+  };
+}
+
+function RiderJobs({ gpsTracking, onOpen, orders, rider }) {
   const expectedDeliveryFees = orders.reduce((total, order) => total + deliveryFeeCashDue(order), 0);
+  const gpsLabel = gpsTracking.dutyActive
+    ? (gpsTracking.lastSentAt ? `GPS active - ${new Date(gpsTracking.lastSentAt).toLocaleTimeString()}` : "GPS starting")
+    : "GPS inactive";
+  const queueLabel = gpsTracking.queuedCount > 0
+    ? `, ${gpsTracking.queuedCount} queued`
+    : "";
 
   return (
     <>
@@ -82,10 +612,12 @@ function RiderJobs({ onOpen, orders, rider }) {
         <div>
           <p className="eyebrow">RIDER WORKSPACE</p>
           <h1>Good evening, {rider.name.split(" ")[0]}</h1>
-          <p><span className="online-dot" /> GPS active - Updated just now</p>
+          <p><span className={`online-dot ${gpsTracking.dutyActive ? "" : "offline"}`} /> {gpsLabel}{queueLabel}</p>
         </div>
         <label className="availability">
-          <small>AVAILABLE</small><input defaultChecked type="checkbox" /><i />
+          <small>{gpsTracking.dutyActive ? "ACTIVE" : "OFFLINE"}</small>
+          <input checked={gpsTracking.dutyActive} onChange={(event) => (event.target.checked ? gpsTracking.startDuty() : gpsTracking.stopDuty())} type="checkbox" />
+          <i />
         </label>
       </section>
       <section className="mini-metrics">
@@ -158,7 +690,7 @@ function RiderHistory({ onOpen, orders }) {
   );
 }
 
-function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress }) {
+function RiderJobDetail({ gpsTracking, history = false, onComplete, order, onBack, onProgress }) {
   const [completing, setCompleting] = useState(false);
   const [feeInput, setFeeInput] = useState("");
   const [pickupOpen, setPickupOpen] = useState(false);
@@ -229,6 +761,7 @@ function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress
         product_payment_method: pickupForm.codEnabled ? "rider_collects" : "already_paid",
         cod_amount: pickupForm.codEnabled ? Number(pickupForm.cod || 0) : 0,
       });
+      gpsTracking?.refreshPosition?.();
       setPickupOpen(false);
     } catch (error) {
       setActionError(errorMessage(error));
@@ -469,15 +1002,139 @@ function RiderJobDetail({ history = false, onComplete, order, onBack, onProgress
   );
 }
 
-function GpsStatus() {
+function GpsStatus({ activeOrders, gpsTracking, rider }) {
+  const position = gpsTracking.lastPosition;
+  const queuedLabel = gpsTracking.queuedCount > 0
+    ? `${gpsTracking.queuedCount} location update${gpsTracking.queuedCount === 1 ? "" : "s"} waiting to sync`
+    : "No queued GPS updates";
+  const trackingStatus = gpsTracking.trackingState === "active"
+    ? "available"
+    : gpsTracking.trackingState === "warning"
+      ? "pending_approval"
+      : gpsTracking.dutyActive
+        ? "online"
+        : "offline";
+
   return (
     <section className="page-section">
       <p className="eyebrow">TRACKING STATUS</p><h1>GPS location</h1>
-      <div className="gps-visual glass"><span><Icon name="location" size={28} /></span><h2>GPS tracking is active</h2><p>Your location was sent just now.</p></div>
+      <div className={`gps-visual glass ${gpsTracking.dutyActive ? "active" : ""}`}>
+        <span><Icon name="location" size={28} /></span>
+        <h2>{gpsTracking.dutyActive ? "Active duty tracking" : "GPS tracking is off"}</h2>
+        <p>{gpsTracking.dutyActive ? "Your working-hours location is shared with office operations." : "Tap Start active when you are ready to receive assignments."}</p>
+      </div>
+      {gpsTracking.dutyActive && <RiderGpsMap position={position} />}
+      <div className="privacy-note glass">
+        <span><Icon name="lock" size={16} /></span>
+        <p>
+          <strong>{gpsTracking.dutyActive ? "Location sharing is on" : "Location sharing is off"}</strong>
+          <small>Office can see your live position only while you are active. Clients see only their assigned rider after pickup. Stop active turns rider location sharing off.</small>
+        </p>
+      </div>
+      {gpsTracking.message && (
+        <p className="gps-warning"><Icon name="location" size={15} /> {gpsTracking.message}</p>
+      )}
+      <div className="action-grid gps-actions">
+        <button className="btn primary" disabled={gpsTracking.dutyActive || gpsTracking.trackingState === "starting"} onClick={gpsTracking.startDuty} type="button">
+          <Icon name="navigation" size={15} /> Start active
+        </button>
+        <button className="btn secondary" disabled={!gpsTracking.dutyActive} onClick={gpsTracking.stopDuty} type="button">
+          <Icon name="close" size={15} /> Stop active
+        </button>
+      </div>
       <div className="compact-list glass">
-        <div className="compact-row"><span className="row-icon"><Icon name="location" size={16} /></span><span className="row-content"><strong>Location permission</strong><small>Allowed while using the app</small></span><StatusBadge status="available" /></div>
-        <div className="compact-row"><span className="row-icon"><Icon name="clock" size={16} /></span><span className="row-content"><strong>Update frequency</strong><small>Every 60 seconds during jobs</small></span></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="bike" size={16} /></span><span className="row-content"><strong>Rider status</strong><small>{rider.status.replaceAll("_", " ")}</small></span><StatusBadge status={rider.status} /></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="location" size={16} /></span><span className="row-content"><strong>Location permission</strong><small>{gpsTracking.permission === "unknown" ? "Waiting for browser permission" : gpsTracking.permission}</small></span><StatusBadge status={trackingStatus} /></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="clock" size={16} /></span><span className="row-content"><strong>Adaptive update frequency</strong><small>15s while moving, 45-60s when stationary</small></span>{gpsTracking.sending && <small>Sending...</small>}</div>
+        <div className="compact-row"><span className="row-icon"><Icon name="upload" size={16} /></span><span className="row-content"><strong>Offline queue</strong><small>{queuedLabel}</small></span>{gpsTracking.flushing && <small>Syncing...</small>}</div>
+        <div className="compact-row"><span className="row-icon"><Icon name="box" size={16} /></span><span className="row-content"><strong>Active assignments</strong><small>{activeOrders.length} current job{activeOrders.length === 1 ? "" : "s"}</small></span></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="mapPin" size={16} /></span><span className="row-content"><strong>Current position</strong><small>{position ? `${position.latitude.toFixed(5)}, ${position.longitude.toFixed(5)}` : "No GPS point sent yet"}</small></span></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="filter" size={16} /></span><span className="row-content"><strong>Accuracy</strong><small>{position?.accuracy ? `${Math.round(position.accuracy)} meters` : "Unknown"}</small></span></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="clock" size={16} /></span><span className="row-content"><strong>Last sent</strong><small>{gpsTracking.lastSentAt ? new Date(gpsTracking.lastSentAt).toLocaleString() : "Not sent yet"}</small></span></div>
       </div>
     </section>
+  );
+}
+
+function RiderGpsMap({ position }) {
+  const mapNodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const hasPosition = Number.isFinite(position?.latitude) && Number.isFinite(position?.longitude);
+
+  useEffect(() => {
+    if (!hasPosition || !mapNodeRef.current || mapRef.current) {
+      return undefined;
+    }
+
+    const map = L.map(mapNodeRef.current, {
+      attributionControl: false,
+      zoomControl: false,
+    }).setView([position.latitude, position.longitude], 16);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    L.control.attribution({ prefix: false }).addTo(map);
+    mapRef.current = map;
+    window.setTimeout(() => map.invalidateSize(), 0);
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+  }, [hasPosition]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (!map || !hasPosition) {
+      return;
+    }
+
+    const latLng = [position.latitude, position.longitude];
+    map.setView(latLng, Math.max(map.getZoom(), 16), { animate: true });
+
+    const icon = L.divIcon({
+      className: "rider-own-marker active",
+      html: '<span></span>',
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+    });
+
+    if (!markerRef.current) {
+      markerRef.current = L.marker(latLng, { icon }).addTo(map);
+    } else {
+      markerRef.current.setLatLng(latLng);
+      markerRef.current.setIcon(icon);
+    }
+
+    window.setTimeout(() => map.invalidateSize(), 0);
+  }, [hasPosition, position?.latitude, position?.longitude]);
+
+  if (!hasPosition) {
+    return (
+      <div className="rider-gps-map unavailable glass">
+        <span><Icon name="mapPin" size={22} /></span>
+        <strong>Waiting for your GPS position</strong>
+        <small>Start active and allow location permission to show your current point on the map.</small>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rider-gps-map glass">
+      <div className="rider-gps-map-canvas" ref={mapNodeRef} />
+      <div className="rider-gps-map-status">
+        <span><Icon name="navigation" size={15} /></span>
+        <div>
+          <strong>Your live position</strong>
+          <small>{position.latitude.toFixed(5)}, {position.longitude.toFixed(5)}{position.accuracy ? ` - ${Math.round(position.accuracy)}m accuracy` : ""}</small>
+        </div>
+      </div>
+    </div>
   );
 }

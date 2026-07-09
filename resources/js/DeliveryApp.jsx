@@ -24,6 +24,7 @@ import {
   fetchCurrentUser,
   fetchNotifications,
   fetchOrders,
+  fetchRealtimeToken,
   fetchReportSummary,
   fetchRiders,
   fetchSettings,
@@ -34,7 +35,12 @@ import {
   logout,
   makeClientAddressDefault,
   markNotificationRead as markNotificationReadRequest,
+  mapLocation,
+  reportRiderGpsEvent as reportRiderGpsEventRequest,
   registerClient,
+  sendRiderLocation,
+  startRiderActive,
+  stopRiderActive,
   updateClientAddress,
   updateClientShop,
   updateClientProfile,
@@ -213,12 +219,43 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
       return undefined;
     }
 
-    return createRealtimeConnection({
-      auth,
-      orders,
-      riders,
-      onRefresh: loadData,
-    });
+    let cancelled = false;
+    let cleanup = () => {};
+
+    fetchRealtimeToken()
+      .then((realtimeAuth) => {
+        if (cancelled) {
+          return;
+        }
+
+        cleanup = createRealtimeConnection({
+          auth,
+          orders,
+          riders,
+          onRefresh: loadData,
+          socketToken: realtimeAuth.token,
+        });
+      })
+      .catch((tokenError) => {
+        if (cancelled) {
+          return;
+        }
+
+        console.warn("[realtime] token_unavailable_using_unsigned_dev_auth", {
+          message: tokenError?.message,
+        });
+        cleanup = createRealtimeConnection({
+          auth,
+          orders,
+          riders,
+          onRefresh: loadData,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
   }, [auth, hasPortalAccess, loadData, orders, riders]);
 
   const submitOrder = async (order) => {
@@ -393,6 +430,71 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
     return response;
   };
 
+  const updateRiderInState = (nextRider) => {
+    setRiders((current) => current.map((item) => (
+      item.id === nextRider.id ? nextRider : item
+    )));
+  };
+
+  const startRiderDuty = async (rider) => {
+    const nextRider = await startRiderActive(rider);
+    updateRiderInState(nextRider);
+
+    return nextRider;
+  };
+
+  const stopRiderDuty = async (rider) => {
+    const nextRider = await stopRiderActive(rider);
+    updateRiderInState(nextRider);
+
+    return nextRider;
+  };
+
+  const reportRiderLocation = async (rider, location) => {
+    const savedLocation = await sendRiderLocation(rider, location);
+    const recordedAt = savedLocation.recorded_at || location.recordedAt || new Date().toISOString();
+    const riderLocation = mapLocation({
+      ...savedLocation,
+      recorded_at: recordedAt,
+      latitude: savedLocation.latitude ?? location.latitude,
+      longitude: savedLocation.longitude ?? location.longitude,
+      accuracy: savedLocation.accuracy ?? location.accuracy ?? null,
+      speed: savedLocation.speed ?? location.speed ?? null,
+      heading: savedLocation.heading ?? location.heading ?? null,
+      battery_percent: savedLocation.battery_percent ?? location.batteryPercent ?? null,
+      source: savedLocation.source || location.source || "browser",
+    });
+
+    setRiders((current) => current.map((item) => (
+      item.id === rider.id
+        ? {
+            ...item,
+            status: item.status === "offline" ? "available" : item.status,
+            lastSeen: recordedAt ? new Date(recordedAt).toLocaleString() : item.lastSeen,
+            currentLocation: riderLocation,
+          }
+        : item
+    )));
+
+    if (savedLocation.delivery_order_id) {
+      setOrders((current) => current.map((order) => (
+        String(order._apiId) === String(savedLocation.delivery_order_id)
+          ? { ...order, riderLocation }
+          : order
+      )));
+    }
+
+    return savedLocation;
+  };
+
+  const reportRiderGpsEvent = async (rider, event) => {
+    if (!rider?._apiId) {
+      return null;
+    }
+
+    return reportRiderGpsEventRequest(rider, event);
+  };
+
   const saveUser = async (user) => {
     const savedUser = user._apiId ? await updateUser(user) : await createUser(user);
     setUsers((current) => [savedUser, ...current.filter((item) => item.id !== savedUser.id)]);
@@ -550,7 +652,7 @@ export default function App({ apiBaseUrl, initialPortal = "client" }) {
           user={auth.user}
         />
       )}
-      {portal === "rider" && <RiderPortal appName={appName} markNotificationRead={markNotificationRead} notifications={notifications} orders={orders} progressOrder={progressOrder} riders={riders} themeProps={themeProps} />}
+      {portal === "rider" && <RiderPortal appName={appName} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} orders={orders} progressOrder={progressOrder} riders={riders} themeProps={themeProps} />}
       {portal === "admin" && (
         <AdminPortal
           appName={appName}

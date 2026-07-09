@@ -1,10 +1,54 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { statusLabels } from "../data";
 import { activeStatuses, currentDateLabel, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { AddressBlock, MobileNav, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
 
 const canModifyPendingOrder = (order) => order?.status === "pending";
+const clientLiveTrackingStatuses = new Set(["picked_up", "going_to_delivery", "arrived_at_delivery", "delivered"]);
+
+function trackingLocationAgeLabel(value) {
+  if (!value) {
+    return "No GPS update";
+  }
+
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+
+  return minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
+}
+
+function distanceMeters(from, to) {
+  if (!from || !to) {
+    return null;
+  }
+
+  const earthRadius = 6371000;
+  const latitudeA = from.latitude * Math.PI / 180;
+  const latitudeB = to.latitude * Math.PI / 180;
+  const deltaLatitude = (to.latitude - from.latitude) * Math.PI / 180;
+  const deltaLongitude = (to.longitude - from.longitude) * Math.PI / 180;
+  const haversine =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(latitudeA) * Math.cos(latitudeB) * Math.sin(deltaLongitude / 2) ** 2;
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function distanceLabel(distance) {
+  if (!Number.isFinite(distance)) {
+    return "";
+  }
+
+  return distance < 1000 ? `${Math.round(distance)}m away` : `${(distance / 1000).toFixed(1)}km away`;
+}
 
 export function ClientPortal({ addresses = [], appName, contactEmail = "", contactPhone = "", markNotificationRead, notifications = [], onLogout, orders, removeAddress, removeOrder, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, shops = [], submitOrder, themeProps, user }) {
   const [page, setPage] = useStoredState("flowdrop.client.page", "home");
@@ -722,6 +766,208 @@ function ReviewSection({ label, title, lines }) {
   );
 }
 
+function ClientLiveTrackingMap({ order }) {
+  const mapNodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const riderMarkerRef = useRef(null);
+  const clientMarkerRef = useRef(null);
+  const distanceLineRef = useRef(null);
+  const [clientPosition, setClientPosition] = useState(null);
+  const [clientLocationStatus, setClientLocationStatus] = useState("idle");
+  const canShowLiveLocation = clientLiveTrackingStatuses.has(order.status);
+  const location = canShowLiveLocation ? order.riderLocation : null;
+  const distance = distanceMeters(clientPosition, location);
+  const formattedDistance = distanceLabel(distance);
+
+  useEffect(() => {
+    if (!canShowLiveLocation) {
+      setClientPosition(null);
+      setClientLocationStatus("idle");
+      return undefined;
+    }
+
+    if (!navigator.geolocation) {
+      setClientLocationStatus("unavailable");
+      return undefined;
+    }
+
+    setClientLocationStatus("locating");
+
+    const handlePosition = (position) => {
+      setClientPosition({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy ?? null,
+      });
+      setClientLocationStatus("ready");
+    };
+
+    const handleError = () => {
+      setClientLocationStatus("unavailable");
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      handlePosition,
+      handleError,
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 },
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [canShowLiveLocation]);
+
+  useEffect(() => {
+    if (!location || !mapNodeRef.current || mapRef.current) {
+      return undefined;
+    }
+
+    const map = L.map(mapNodeRef.current, {
+      attributionControl: false,
+      zoomControl: false,
+    }).setView([location.latitude, location.longitude], 15);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    L.control.attribution({ prefix: false }).addTo(map);
+    mapRef.current = map;
+    window.setTimeout(() => map.invalidateSize(), 0);
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      riderMarkerRef.current = null;
+      clientMarkerRef.current = null;
+      distanceLineRef.current = null;
+    };
+  }, [Boolean(location)]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (!map || !location) {
+      return;
+    }
+
+    const riderLatLng = [location.latitude, location.longitude];
+
+    if (!riderMarkerRef.current) {
+      riderMarkerRef.current = L.marker(riderLatLng, {
+        icon: L.divIcon({
+          className: `client-rider-marker ${location.freshness || "fresh"}`,
+          html: '<span>D</span>',
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
+        }),
+      }).addTo(map);
+    } else {
+      riderMarkerRef.current.setLatLng(riderLatLng);
+      riderMarkerRef.current.setIcon(L.divIcon({
+        className: `client-rider-marker ${location.freshness || "fresh"}`,
+        html: '<span>D</span>',
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+      }));
+    }
+
+    if (clientPosition) {
+      const clientLatLng = [clientPosition.latitude, clientPosition.longitude];
+
+      if (!clientMarkerRef.current) {
+        clientMarkerRef.current = L.marker(clientLatLng, {
+          icon: L.divIcon({
+            className: "client-self-marker",
+            html: '<span>You</span>',
+            iconSize: [42, 24],
+            iconAnchor: [21, 12],
+          }),
+        }).addTo(map);
+      } else {
+        clientMarkerRef.current.setLatLng(clientLatLng);
+      }
+
+      const linePoints = [clientLatLng, riderLatLng];
+
+      if (!distanceLineRef.current) {
+        distanceLineRef.current = L.polyline(linePoints, {
+          color: "#087f74",
+          dashArray: "6 7",
+          opacity: 0.72,
+          weight: 3,
+        }).addTo(map);
+      } else {
+        distanceLineRef.current.setLatLngs(linePoints);
+      }
+
+      map.fitBounds(L.latLngBounds(linePoints).pad(0.35), {
+        animate: true,
+        maxZoom: 16,
+      });
+    } else {
+      if (clientMarkerRef.current) {
+        clientMarkerRef.current.remove();
+        clientMarkerRef.current = null;
+      }
+
+      if (distanceLineRef.current) {
+        distanceLineRef.current.remove();
+        distanceLineRef.current = null;
+      }
+
+      map.setView(riderLatLng, Math.max(map.getZoom(), 15), { animate: true });
+    }
+
+    window.setTimeout(() => map.invalidateSize(), 0);
+  }, [clientPosition?.latitude, clientPosition?.longitude, location?.latitude, location?.longitude, location?.freshness]);
+
+  if (!canShowLiveLocation) {
+    return (
+      <div className="client-live-map unavailable glass">
+        <span><Icon name="lock" size={22} /></span>
+        <strong>Live GPS is hidden before pickup</strong>
+        <small>You will see your assigned rider on the map after the product is picked up.</small>
+      </div>
+    );
+  }
+
+  if (!location) {
+    return (
+      <div className="client-live-map unavailable glass">
+        <span><Icon name="location" size={22} /></span>
+        <strong>Waiting for rider GPS</strong>
+        <small>The rider has picked up the product, but no live GPS point is available yet.</small>
+      </div>
+    );
+  }
+
+  return (
+    <div className="client-live-map glass">
+      <div className="client-live-map-canvas" ref={mapNodeRef} />
+      <div className="client-map-status">
+        <span><Icon name="bike" size={15} /></span>
+        <div>
+          <strong>Assigned delivery rider</strong>
+          <small>
+            {formattedDistance ? `${formattedDistance} - ` : ""}
+            Updated {trackingLocationAgeLabel(location.recordedAt)}
+            {location.accuracy ? ` - ${Math.round(location.accuracy)}m rider accuracy` : ""}
+          </small>
+          <small>
+            {clientLocationStatus === "ready" && clientPosition
+              ? `Your position: ${clientPosition.latitude.toFixed(5)}, ${clientPosition.longitude.toFixed(5)}`
+              : clientLocationStatus === "unavailable"
+                ? "Your position unavailable"
+                : "Locating your position"}
+          </small>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TrackingView({ order, onBack, onDelete, onEdit }) {
   if (!order) return null;
   const steps = ["pending", "rider_assigned", "rider_accepted", "picked_up", "delivered"];
@@ -739,6 +985,13 @@ function TrackingView({ order, onBack, onDelete, onEdit }) {
     completed: 4,
   };
   const currentIndex = trackingIndex[order.status] ?? 0;
+  const liveTrackingVisible = clientLiveTrackingStatuses.has(order.status);
+  const trackingMessage = liveTrackingVisible
+    ? (order.riderLocation ? "The assigned delivery rider location is updating live after pickup." : "The rider has picked up the product. Live GPS will appear when the rider app sends a location.")
+    : order.status === "pending"
+      ? "The office team will review your request shortly."
+      : "Live rider GPS becomes visible after the product is picked up.";
+
   return (
     <section className="page-section tracking">
       <button className="back-btn" onClick={onBack} type="button"><Icon name="chevronLeft" size={17} /> My deliveries</button>
@@ -746,17 +999,12 @@ function TrackingView({ order, onBack, onDelete, onEdit }) {
         <div><p className="eyebrow">DELIVERY TRACKING</p><h1>{order.id}</h1></div>
         <StatusBadge status={order.status} />
       </div>
-      <div className="map-preview glass">
-        <div className="map-road one" /><div className="map-road two" /><div className="map-road three" />
-        <span className="map-point start"><Icon name="box" size={14} /></span>
-        <span className="map-point rider"><Icon name="bike" size={15} /></span>
-        <span className="map-point end"><Icon name="mapPin" size={15} /></span>
-        <span className="map-static-note">Status map</span>
-      </div>
+      <ClientLiveTrackingMap order={order} />
       <div className="tracking-status glass">
         <p className="eyebrow">CURRENT STATUS</p>
         <h2>{statusLabels[order.status]}</h2>
-        <p>{order.status === "pending" ? "The office team will review your request shortly." : "This mini version shows workflow status updates, not live GPS tracking."}</p>
+        <p>{trackingMessage}</p>
+        <small className="tracking-privacy-note">For privacy, rider name and phone are hidden from client tracking.</small>
         {canModifyPendingOrder(order) && (
           <div className="address-actions">
             <button className="btn secondary" onClick={() => onEdit(order.id)} type="button">Edit request</button>

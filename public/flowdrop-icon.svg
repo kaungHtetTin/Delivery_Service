@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FlowDrop Delivery">
+  <rect width="512" height="512" rx="112" fill="#087f74"/>
+  <path d="M132 265 384 104 278 408l-38-124-108-19Z" fill="#fff"/>
+  <path d="m240 284 144-180-106 304-38-124Z" fill="#d7fff8" opacity=".85"/>
+</svg>

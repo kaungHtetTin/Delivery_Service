@@ -8,6 +8,9 @@
             name="description"
             content="Professional local delivery service management platform"
         >
+        <link rel="manifest" href="/manifest.webmanifest">
+        <link rel="icon" href="/flowdrop-icon.svg" type="image/svg+xml">
+        <link rel="apple-touch-icon" href="/flowdrop-icon.svg">
         <title>FlowDrop Delivery</title>
         @viteReactRefresh
         @vite('resources/js/main.jsx')

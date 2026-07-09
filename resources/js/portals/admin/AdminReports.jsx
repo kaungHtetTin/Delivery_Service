@@ -12,6 +12,28 @@ const badgeStatuses = new Set([
   "rejected",
   "unpaid",
 ]);
+const trackedRiderStatuses = new Set(["available", "online", "busy", "on_break"]);
+
+function reportLocationFreshness(rider) {
+  const location = rider.currentLocation || rider.latest_location;
+
+  if (!location?.recordedAt && !location?.recorded_at) {
+    return "no_gps";
+  }
+
+  if (location.freshness) {
+    return location.freshness;
+  }
+
+  const recordedAt = location.recordedAt || location.recorded_at;
+  const ageSeconds = (Date.now() - new Date(recordedAt).getTime()) / 1000;
+
+  if (ageSeconds <= 30) {
+    return "fresh";
+  }
+
+  return ageSeconds <= 120 ? "warning" : "stale";
+}
 
 export function AdminReports({ orders, reportData, riders }) {
   const localSummary = buildLocalSummary(orders, riders);
@@ -35,6 +57,16 @@ export function AdminReports({ orders, reportData, riders }) {
     records: reportData?.delivery_fees?.records ?? localSummary.cash.records,
     cashHeld: reportData?.riders?.reduce((total, rider) => total + Number(rider.cash_held || 0), 0) ?? localSummary.cash.cashHeld,
   };
+  const gpsSummary = {
+    activeRiders: reportData?.gps?.active_riders ?? localSummary.gps.activeRiders,
+    freshRiders: reportData?.gps?.fresh_riders ?? localSummary.gps.freshRiders,
+    warningRiders: reportData?.gps?.warning_riders ?? localSummary.gps.warningRiders,
+    staleRiders: reportData?.gps?.stale_riders ?? localSummary.gps.staleRiders,
+    noGpsRiders: reportData?.gps?.no_gps_riders ?? localSummary.gps.noGpsRiders,
+    poorAccuracyRiders: reportData?.gps?.poor_accuracy_riders ?? localSummary.gps.poorAccuracyRiders,
+    updatesLastMinute: reportData?.gps?.updates_last_minute ?? localSummary.gps.updatesLastMinute,
+    averageAccuracy: reportData?.gps?.average_accuracy ?? localSummary.gps.averageAccuracy,
+  };
   const riderRows = reportData?.riders || riders.map((rider) => ({
     code: rider.id,
     name: rider.name,
@@ -54,6 +86,9 @@ export function AdminReports({ orders, reportData, riders }) {
         <ReportMetric label="Paid payments" value={paymentSummary.paid} note={money(paymentSummary.approvedAmount)} />
         <ReportMetric label="Rider-collected fees" value={money(cashSummary.riderCollected)} note={`${cashSummary.records} completed fee records`} />
         <ReportMetric label="Rider cash held" value={money(cashSummary.cashHeld)} note="Current balance" />
+        <ReportMetric label="GPS active riders" value={gpsSummary.activeRiders} note={`${gpsSummary.freshRiders} fresh positions`} />
+        <ReportMetric label="Stale or no GPS" value={gpsSummary.staleRiders + gpsSummary.noGpsRiders} note={`${gpsSummary.poorAccuracyRiders} weak accuracy`} />
+        <ReportMetric label="GPS updates/min" value={gpsSummary.updatesLastMinute} note={gpsSummary.averageAccuracy ? `${gpsSummary.averageAccuracy}m average accuracy` : "No recent GPS accuracy"} />
       </div>
 
       <div className="report-panels">
@@ -87,6 +122,17 @@ export function AdminReports({ orders, reportData, riders }) {
           ]}
           title="Rider-collected fees"
         />
+        <ReportStatusPanel
+          eyebrow="GPS HEALTH"
+          rows={[
+            ["Fresh", gpsSummary.freshRiders, "riders"],
+            ["Warning", gpsSummary.warningRiders, "31-120s"],
+            ["Stale", gpsSummary.staleRiders, "over 2m"],
+            ["No GPS", gpsSummary.noGpsRiders, "online riders"],
+            ["Weak accuracy", gpsSummary.poorAccuracyRiders, "over 100m"],
+          ]}
+          title="Rider tracking operations"
+        />
       </div>
 
       <div className="panel glass">
@@ -119,6 +165,11 @@ export function AdminReports({ orders, reportData, riders }) {
 }
 
 function buildLocalSummary(orders, riders) {
+  const trackedRiders = riders.filter((rider) => trackedRiderStatuses.has(rider.status));
+  const locationsWithAccuracy = trackedRiders
+    .map((rider) => rider.currentLocation)
+    .filter((location) => location?.accuracy !== null && location?.accuracy !== undefined);
+
   return {
     orders: {
       total: orders.length,
@@ -143,6 +194,18 @@ function buildLocalSummary(orders, riders) {
         .reduce((total, order) => total + Number(order.fee || 0), 0),
       records: orders.filter((order) => order.paymentStatus === "paid").length,
       cashHeld: riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0),
+    },
+    gps: {
+      activeRiders: trackedRiders.length,
+      freshRiders: trackedRiders.filter((rider) => reportLocationFreshness(rider) === "fresh").length,
+      warningRiders: trackedRiders.filter((rider) => reportLocationFreshness(rider) === "warning").length,
+      staleRiders: trackedRiders.filter((rider) => reportLocationFreshness(rider) === "stale").length,
+      noGpsRiders: trackedRiders.filter((rider) => reportLocationFreshness(rider) === "no_gps").length,
+      poorAccuracyRiders: trackedRiders.filter((rider) => Number(rider.currentLocation?.accuracy || 0) > 100).length,
+      updatesLastMinute: 0,
+      averageAccuracy: locationsWithAccuracy.length
+        ? Math.round((locationsWithAccuracy.reduce((total, location) => total + Number(location.accuracy || 0), 0) / locationsWithAccuracy.length) * 10) / 10
+        : null,
     },
   };
 }

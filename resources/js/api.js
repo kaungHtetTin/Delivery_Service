@@ -108,6 +108,26 @@ const dateInputValue = (value) => {
   return `${year}-${month}-${day}`;
 };
 
+export function mapLocation(location) {
+  if (!location) {
+    return null;
+  }
+
+  return {
+    latitude: Number(location.latitude),
+    longitude: Number(location.longitude),
+    accuracy: location.accuracy !== null && location.accuracy !== undefined ? Number(location.accuracy) : null,
+    speed: location.speed !== null && location.speed !== undefined ? Number(location.speed) : null,
+    heading: location.heading !== null && location.heading !== undefined ? Number(location.heading) : null,
+    batteryPercent: location.battery_percent ?? null,
+    recordedAt: location.recorded_at || "",
+    recordedAtLabel: location.recorded_at ? new Date(location.recorded_at).toLocaleString() : "",
+    freshness: location.freshness || "",
+    isStale: Boolean(location.is_stale),
+    source: location.source || "browser",
+  };
+}
+
 export async function login(credentials) {
   return request("/auth/token", {
     method: "POST",
@@ -269,6 +289,10 @@ export async function fetchNotifications() {
   return response.data.map(mapNotification);
 }
 
+export async function fetchRealtimeToken() {
+  return request("/realtime/token");
+}
+
 export async function markNotificationRead(notificationId) {
   const response = await request(`/notifications/${notificationId}/read`, {
     method: "PATCH",
@@ -319,6 +343,9 @@ export function mapOrder(order) {
     fee: Number(order.delivery_fee),
     riderId: order.rider?.code || null,
     riderApiId: order.rider_id || order.rider?.id || "",
+    riderName: order.rider?.name || "",
+    riderPhone: order.rider?.phone || "",
+    riderLocation: mapLocation(order.rider?.latest_location),
     customerId: order.customer_id || "",
     customerName: order.customer?.name || "",
     shopId: order.shop_id || "",
@@ -466,6 +493,8 @@ export function mapPayment(payment) {
 }
 
 export function mapRider(rider) {
+  const latestLocation = rider.latest_location || null;
+
   return {
     _apiId: rider.id,
     userId: rider.user_id || "",
@@ -482,6 +511,7 @@ export function mapRider(rider) {
       : "No recent update",
     cashHeld: Number(rider.cash_held),
     vehicle: humanize(rider.vehicle_type),
+    currentLocation: mapLocation(latestLocation),
   };
 }
 
@@ -507,6 +537,54 @@ export async function deleteDeliveryOrder(order) {
 export async function fetchRiders() {
   const response = await request("/riders");
   return response.data.map(mapRider);
+}
+
+export async function startRiderActive(rider) {
+  const response = await request(`/riders/${rider._apiId}/start-active`, {
+    method: "POST",
+  });
+
+  return mapRider(response);
+}
+
+export async function stopRiderActive(rider) {
+  const response = await request(`/riders/${rider._apiId}/stop-active`, {
+    method: "POST",
+  });
+
+  return mapRider(response);
+}
+
+export async function sendRiderLocation(rider, location) {
+  return request(`/riders/${rider._apiId}/locations`, {
+    method: "POST",
+    body: JSON.stringify({
+      delivery_order_id: location.deliveryOrderApiId || null,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy ?? null,
+      speed: location.speed ?? null,
+      heading: location.heading ?? null,
+      battery_percent: location.batteryPercent ?? null,
+      source: location.source || "browser",
+      recorded_at: location.recordedAt || new Date().toISOString(),
+    }),
+  });
+}
+
+export async function reportRiderGpsEvent(rider, event) {
+  return request(`/riders/${rider._apiId}/gps-events`, {
+    method: "POST",
+    body: JSON.stringify({
+      event: event.event,
+      message: event.message || null,
+      permission: event.permission || null,
+      tracking_state: event.trackingState || null,
+      queued_count: event.queuedCount ?? null,
+      accuracy: event.accuracy ?? null,
+      occurred_at: event.occurredAt || new Date().toISOString(),
+    }),
+  });
 }
 
 export async function fetchUsers() {

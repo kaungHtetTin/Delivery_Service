@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\DeliveryOrderController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\RealtimeTokenController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RiderController;
 use App\Http\Controllers\Api\ShopController;
@@ -42,6 +43,7 @@ Route::middleware('auth:sanctum')->post('user/profile', [UserProfileController::
 Route::middleware('auth:sanctum')->post('auth/logout', [AuthController::class, 'logout']);
 Route::middleware('auth:sanctum')->get('notifications', [NotificationController::class, 'index']);
 Route::middleware('auth:sanctum')->patch('notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
+Route::middleware('auth:sanctum')->get('realtime/token', [RealtimeTokenController::class, 'show']);
 
 Route::middleware(['auth:sanctum', 'role:client'])->group(function () {
     Route::get('client/profile', [ClientProfileController::class, 'show']);
@@ -96,7 +98,11 @@ Route::middleware(['auth:sanctum', 'role:rider,office_admin,super_admin'])->grou
     Route::patch('delivery-orders/{deliveryOrder}/status', [DeliveryOrderController::class, 'updateStatus']);
     Route::get('riders', [RiderController::class, 'index']);
     Route::get('riders/{rider}/assignments', [RiderController::class, 'assignments']);
-    Route::post('riders/{rider}/locations', [RiderController::class, 'storeLocation']);
+    Route::post('riders/{rider}/start-active', [RiderController::class, 'startActive']);
+    Route::post('riders/{rider}/stop-active', [RiderController::class, 'stopActive']);
+    Route::post('riders/{rider}/gps-events', [RiderController::class, 'reportGpsEvent']);
+    Route::post('riders/{rider}/locations', [RiderController::class, 'storeLocation'])
+        ->middleware('throttle:rider-locations');
 });
 
 Route::post('payments/{payment}/screenshot', [PaymentController::class, 'uploadScreenshot']);

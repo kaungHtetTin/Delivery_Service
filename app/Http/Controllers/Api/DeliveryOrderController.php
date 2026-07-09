@@ -22,10 +22,17 @@ use Illuminate\Validation\ValidationException;
 
 class DeliveryOrderController extends Controller
 {
+    private const CLIENT_VISIBLE_RIDER_LOCATION_STATUSES = [
+        'picked_up',
+        'going_to_delivery',
+        'arrived_at_delivery',
+        'delivered',
+    ];
+
     public function index(Request $request): JsonResponse
     {
         $orders = DeliveryOrder::query()
-            ->with(['rider', 'payments', 'customer', 'shop', 'clientUser'])
+            ->with(['rider.latestLocation', 'payments', 'customer', 'shop', 'clientUser'])
             ->when($request->user()?->role === User::ROLE_CLIENT, function ($query) use ($request) {
                 $query->where('client_user_id', $request->user()->id);
             })
@@ -55,6 +62,8 @@ class DeliveryOrderController extends Controller
             })
             ->latest()
             ->paginate($request->integer('per_page', 25));
+
+        $orders->getCollection()->transform(fn (DeliveryOrder $order) => $this->orderForResponse($request, $order));
 
         return response()->json($orders);
     }
@@ -125,23 +134,25 @@ class DeliveryOrderController extends Controller
             return $order;
         });
 
-        $freshOrder = $order->fresh()->load(['rider', 'clientUser', 'statusHistories', 'payments']);
+        $freshOrder = $order->fresh()->load(['rider.latestLocation', 'clientUser', 'statusHistories', 'payments']);
         app(RealtimeSocketPublisher::class)->orderCreated($freshOrder);
 
         return response()->json($freshOrder, 201);
     }
 
-    public function show(DeliveryOrder $deliveryOrder): JsonResponse
+    public function show(Request $request, DeliveryOrder $deliveryOrder): JsonResponse
     {
-        return response()->json($deliveryOrder->load([
-            'rider',
+        $deliveryOrder->load([
+            'rider.latestLocation',
             'customer',
             'shop',
             'clientUser',
             'statusHistories',
             'payments',
             'cashCollection',
-        ]));
+        ]);
+
+        return response()->json($this->orderForResponse($request, $deliveryOrder));
     }
 
     public function update(Request $request, DeliveryOrder $deliveryOrder): JsonResponse
@@ -193,7 +204,7 @@ class DeliveryOrderController extends Controller
             ]);
         });
 
-        $freshOrder = $deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories', 'payments', 'cashCollection']);
+        $freshOrder = $deliveryOrder->fresh()->load(['rider.latestLocation', 'customer', 'shop', 'clientUser', 'statusHistories', 'payments', 'cashCollection']);
 
         if (array_key_exists('status', $validated) && $validated['status'] !== $previousStatus) {
             app(RealtimeSocketPublisher::class)->orderStatusUpdated($freshOrder);
@@ -306,7 +317,7 @@ class DeliveryOrderController extends Controller
             }
         });
 
-        $freshOrder = $deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories']);
+        $freshOrder = $deliveryOrder->fresh()->load(['rider.latestLocation', 'customer', 'shop', 'clientUser', 'statusHistories']);
         app(RealtimeSocketPublisher::class)->orderAssigned($freshOrder);
 
         return response()->json($freshOrder);
@@ -399,7 +410,7 @@ class DeliveryOrderController extends Controller
             }
         });
 
-        $freshOrder = $deliveryOrder->fresh()->load(['rider', 'customer', 'shop', 'clientUser', 'statusHistories', 'cashCollection']);
+        $freshOrder = $deliveryOrder->fresh()->load(['rider.latestLocation', 'customer', 'shop', 'clientUser', 'statusHistories', 'cashCollection']);
         app(RealtimeSocketPublisher::class)->orderStatusUpdated($freshOrder);
 
         return response()->json($freshOrder);
@@ -531,5 +542,31 @@ class DeliveryOrderController extends Controller
     private function statusLabel(string $status): string
     {
         return str($status)->replace('_', ' ')->title()->toString();
+    }
+
+    private function orderForResponse(Request $request, DeliveryOrder $order): DeliveryOrder
+    {
+        if ($order->rider) {
+            $order->setRelation('rider', clone $order->rider);
+        }
+
+        if ($request->user()?->role === User::ROLE_CLIENT && $order->rider) {
+            $order->rider->makeHidden(['code', 'name', 'phone', 'email', 'user_id']);
+
+            if (! $this->clientCanSeeRiderLocation($order)) {
+                $order->rider->unsetRelation('latestLocation');
+            } else {
+                $order->rider->load('latestLocation');
+            }
+        }
+
+        return $order;
+    }
+
+    private function clientCanSeeRiderLocation(DeliveryOrder $order): bool
+    {
+        return $order->rider_id
+            && $order->client_user_id
+            && in_array($order->status, self::CLIENT_VISIBLE_RIDER_LOCATION_STATUSES, true);
     }
 }

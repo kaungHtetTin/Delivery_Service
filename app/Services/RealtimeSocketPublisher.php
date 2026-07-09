@@ -150,18 +150,28 @@ class RealtimeSocketPublisher
 
     public function riderLocationUpdated(RiderLocation $location): void
     {
-        $location->loadMissing('rider');
+        $location->loadMissing('rider', 'deliveryOrder');
+        $order = $location->deliveryOrder;
+        $clientTrackingVisible = $order
+            && (int) $order->rider_id === (int) $location->rider_id
+            && in_array($order->status, ['picked_up', 'going_to_delivery', 'arrived_at_delivery', 'delivered'], true);
 
         $this->publish('rider.location.updated', [
             'id' => $location->id,
             'rider_id' => $location->rider_id,
             'delivery_order_id' => $location->delivery_order_id,
             'order_id' => $location->delivery_order_id,
+            'client_user_id' => $clientTrackingVisible ? $order?->client_user_id : null,
             'latitude' => $location->latitude,
             'longitude' => $location->longitude,
             'accuracy' => $location->accuracy,
             'speed' => $location->speed,
+            'heading' => $location->heading,
             'battery_percent' => $location->battery_percent,
+            'source' => $location->source,
+            'freshness' => $location->freshness,
+            'is_stale' => $location->is_stale,
+            'client_tracking_visible' => (bool) $clientTrackingVisible,
             'recorded_at' => $location->recorded_at,
             'user_id' => $location->rider?->user_id,
         ]);

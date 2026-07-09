@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { formatSettingValue, settingValueForInput } from "../api";
 import { activeStatuses, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
@@ -12,6 +14,93 @@ function todayDateInputValue() {
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+const trackedRiderStatuses = new Set(["available", "online", "busy", "on_break"]);
+
+function locationFreshness(rider) {
+  if (!rider.currentLocation?.recordedAt) {
+    return "no_gps";
+  }
+
+  if (rider.currentLocation.freshness) {
+    return rider.currentLocation.freshness;
+  }
+
+  const ageSeconds = (Date.now() - new Date(rider.currentLocation.recordedAt).getTime()) / 1000;
+
+  if (ageSeconds <= 30) {
+    return "fresh";
+  }
+
+  return ageSeconds <= 120 ? "warning" : "stale";
+}
+
+function locationAgeLabel(value) {
+  if (!value) {
+    return "No GPS update";
+  }
+
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
+function buildLocalGpsAlerts(riders, orders) {
+  const activeOrderCountByRider = orders.reduce((counts, order) => {
+    if (order.riderApiId) {
+      counts[String(order.riderApiId)] = (counts[String(order.riderApiId)] || 0) + 1;
+    }
+
+    return counts;
+  }, {});
+
+  return riders
+    .filter((rider) => trackedRiderStatuses.has(rider.status))
+    .flatMap((rider) => {
+      const freshness = locationFreshness(rider);
+      const activeOrderCount = activeOrderCountByRider[String(rider._apiId)] || 0;
+      const alerts = [];
+
+      if (freshness === "no_gps") {
+        alerts.push({
+          severity: activeOrderCount > 0 ? "danger" : "warning",
+          title: activeOrderCount > 0 ? "Active rider has no GPS" : "Online rider has no GPS",
+          message: activeOrderCount > 0
+            ? `${rider.name} has active delivery work but no GPS point yet.`
+            : `${rider.name} is online but has not sent a GPS point.`,
+        });
+      }
+
+      if (freshness === "stale") {
+        alerts.push({
+          severity: activeOrderCount > 0 ? "danger" : "warning",
+          title: activeOrderCount > 0 ? "Active delivery GPS stale" : "Rider GPS stale",
+          message: `${rider.name} last updated ${locationAgeLabel(rider.currentLocation?.recordedAt)}.`,
+        });
+      }
+
+      if (Number(rider.currentLocation?.accuracy || 0) > 100) {
+        alerts.push({
+          severity: "warning",
+          title: "GPS accuracy is weak",
+          message: `${rider.name} last reported about ${Math.round(Number(rider.currentLocation.accuracy))}m accuracy.`,
+        });
+      }
+
+      return alerts;
+    })
+    .slice(0, 8);
 }
 
 export function AdminPortal({
@@ -118,6 +207,10 @@ export function AdminPortal({
   const usersPagination = usePagination(users, "users");
   const totalCashHeld = riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0);
   const currentOperationOrders = orders.filter((order) => !["completed", "failed", "cancelled"].includes(order.status));
+  const incompleteOrderCount = currentOperationOrders.length;
+  const gpsAlerts = reportData?.gps_alerts?.length
+    ? reportData.gps_alerts
+    : buildLocalGpsAlerts(riders, currentOperationOrders);
   const stats = [
     ["New requests", orders.filter((order) => order.status === "pending").length, "box", "Waiting for review"],
     ["Active deliveries", orders.filter((order) => activeStatuses.has(order.status)).length, "navigation", "Live operations"],
@@ -190,7 +283,10 @@ export function AdminPortal({
           <div className="topbar-actions">
             <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
             <ThemeControl {...themeProps} />
-            <button className="icon-btn notification-btn" type="button"><Icon name="bell" /><span /></button>
+            <button aria-label={`${incompleteOrderCount} unfinished orders`} className="icon-btn notification-btn" onClick={() => setPage("orders")} type="button">
+              <Icon name="bell" />
+              {incompleteOrderCount > 0 && <span>{incompleteOrderCount > 99 ? "99+" : incompleteOrderCount}</span>}
+            </button>
             <AdminProfileMenu onLogout={onLogout} onProfile={() => setPage("profile")} onSettings={() => setPage("settings")} onUsers={() => setPage("users")} user={user} />
           </div>
         </header>
@@ -220,14 +316,11 @@ export function AdminPortal({
                 </div>
                 <div className="panel map-panel glass">
                   <PanelHeading title="Live rider map" eyebrow="LOCATION" action="Open tracking map" onAction={() => setPage("tracking")} />
-                  <AdminMap riders={riders} />
+                  <AdminMap onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} />
                 </div>
                 <div className="panel glass">
                   <PanelHeading title="Attention needed" eyebrow="ALERTS" />
-                  <div className="alert-list">
-                    <div><span className="alert-icon info"><Icon name="bike" size={15} /></span><p><strong>Rider location updated</strong><small>Aung Kyaw - 1 min ago</small></p></div>
-                    <div><span className="alert-icon info"><Icon name="wallet" size={15} /></span><p><strong>Delivery fees collected in cash</strong><small>Set by rider when completing delivery</small></p></div>
-                  </div>
+                  <OperationalAlerts alerts={gpsAlerts} onOpenTracking={() => setPage("tracking")} />
                 </div>
               </section>
             </>
@@ -250,7 +343,7 @@ export function AdminPortal({
           {activePage === "collections" && <RiderCollectionsAdmin filters={collectionFilters} onCollect={setSettlementRider} onFilterChange={setCollectionFilters} pagination={collectionsPagination} riders={collectionsPagination.items} totalCashHeld={totalCashHeld} />}
           {activePage === "users" && <UsersAdmin onDelete={removeUser} onEdit={(user) => setUserEditor(user)} onNew={() => setUserEditor({})} pagination={usersPagination} users={usersPagination.items} />}
           {activePage === "settings" && <SettingsAdmin onDelete={removeSetting} onEdit={(setting) => setSettingEditor(setting)} onNew={() => setSettingEditor({})} settings={settings} />}
-          {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap riders={riders} large /></section>}
+          {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
           {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
           {!["dashboard", "orders", "riders", "collections", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
@@ -318,6 +411,34 @@ function PanelHeading({ eyebrow, title, action, onAction }) {
     <div className="panel-heading">
       <div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div>
       {action && <button className="text-btn" onClick={onAction} type="button">{action}</button>}
+    </div>
+  );
+}
+
+function OperationalAlerts({ alerts, onOpenTracking }) {
+  if (!alerts.length) {
+    return (
+      <div className="alert-list">
+        <button className="alert-row" onClick={onOpenTracking} type="button">
+          <span className="alert-icon info"><Icon name="location" size={15} /></span>
+          <p><strong>GPS operations normal</strong><small>No stale rider location alerts right now</small></p>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="alert-list">
+      {alerts.slice(0, 6).map((alert, index) => {
+        const severity = alert.severity === "danger" ? "danger" : alert.severity === "warning" ? "warning" : "info";
+
+        return (
+          <button className="alert-row" key={`${alert.type || alert.title}-${alert.rider_id || index}`} onClick={onOpenTracking} type="button">
+            <span className={`alert-icon ${severity}`}><Icon name={severity === "info" ? "bike" : "location"} size={15} /></span>
+            <p><strong>{alert.title}</strong><small>{alert.message || alert.detail || "Review rider GPS status"}</small></p>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -848,11 +969,190 @@ function CrudActions({ label, onDelete, onEdit }) {
   );
 }
 
-function AdminMap({ riders, large = false }) {
+function AdminMap({ large = false, onSelectOrder, orders = [], riders }) {
+  const mapNodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerLayerRef = useRef(null);
+  const [filters, setFilters] = useState({
+    search: "",
+    status: "working",
+    assignment: "all",
+  });
+  const [selectedRiderId, setSelectedRiderId] = useState("");
+
+  const activeOrderCount = (rider) => orders.filter((order) => (
+    order.riderId === rider.id || String(order.riderApiId || "") === String(rider._apiId || "")
+  )).length;
+
+  const visibleRiders = useMemo(() => riders
+    .filter((rider) => {
+      const searchText = `${rider.id} ${rider.name} ${rider.phone} ${rider.area}`.toLowerCase();
+      const matchesSearch = !filters.search || searchText.includes(filters.search.toLowerCase());
+      const matchesStatus = filters.status === "all"
+        || (filters.status === "working" ? trackedRiderStatuses.has(rider.status) : rider.status === filters.status);
+      const assignedCount = activeOrderCount(rider);
+      const matchesAssignment = filters.assignment === "all"
+        || (filters.assignment === "assigned" ? assignedCount > 0 : assignedCount === 0);
+
+      return matchesSearch && matchesStatus && matchesAssignment;
+    }),
+    [filters, orders, riders],
+  );
+  const locatedRiders = visibleRiders.filter((rider) => (
+    Number.isFinite(rider.currentLocation?.latitude) && Number.isFinite(rider.currentLocation?.longitude)
+  ));
+  const selectedRider = visibleRiders.find((rider) => rider.id === selectedRiderId)
+    || locatedRiders[0]
+    || visibleRiders[0]
+    || null;
+  const selectedOrders = selectedRider
+    ? orders.filter((order) => order.riderId === selectedRider.id || String(order.riderApiId || "") === String(selectedRider._apiId || ""))
+    : [];
+  const freshCount = locatedRiders.filter((rider) => locationFreshness(rider) === "fresh").length;
+  const warningCount = locatedRiders.filter((rider) => locationFreshness(rider) === "warning").length;
+  const staleCount = locatedRiders.filter((rider) => locationFreshness(rider) === "stale").length;
+
+  useEffect(() => {
+    if (!mapNodeRef.current || mapRef.current) {
+      return undefined;
+    }
+
+    const map = L.map(mapNodeRef.current, {
+      attributionControl: true,
+      zoomControl: true,
+    }).setView([16.8409, 96.1735], 12);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    markerLayerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    window.setTimeout(() => map.invalidateSize(), 0);
+
+    return () => {
+      map.remove();
+      markerLayerRef.current = null;
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const markerLayer = markerLayerRef.current;
+
+    if (!map || !markerLayer) {
+      return;
+    }
+
+    markerLayer.clearLayers();
+
+    locatedRiders.forEach((rider) => {
+      const freshness = locationFreshness(rider);
+      const marker = L.marker([rider.currentLocation.latitude, rider.currentLocation.longitude], {
+        icon: L.divIcon({
+          className: `rider-map-marker ${freshness} ${selectedRider?.id === rider.id ? "selected" : ""}`,
+          html: `<span>${rider.initials}</span>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+        }),
+      });
+
+      marker.bindTooltip(`${rider.name} - ${locationAgeLabel(rider.currentLocation.recordedAt)}`, {
+        direction: "top",
+        offset: [0, -14],
+        opacity: 0.94,
+      });
+      marker.on("click", () => setSelectedRiderId(rider.id));
+      marker.addTo(markerLayer);
+    });
+
+    if (locatedRiders.length > 0) {
+      const bounds = L.latLngBounds(locatedRiders.map((rider) => [rider.currentLocation.latitude, rider.currentLocation.longitude]));
+      map.fitBounds(bounds, {
+        maxZoom: locatedRiders.length === 1 ? 15 : 14,
+        padding: [34, 34],
+      });
+    }
+
+    window.setTimeout(() => map.invalidateSize(), 0);
+  }, [locatedRiders, selectedRider?.id]);
+
+  useEffect(() => {
+    if (selectedRiderId && !visibleRiders.some((rider) => rider.id === selectedRiderId)) {
+      setSelectedRiderId("");
+    }
+  }, [selectedRiderId, visibleRiders]);
+
+  const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+
   return (
     <div className={`admin-map ${large ? "large" : ""}`}>
-      <div className="map-road one" /><div className="map-road two" /><div className="map-road three" /><div className="map-road four" />
-      {riders.slice(0, 4).map((rider, index) => <span className={`rider-pin pin-${index + 1}`} key={rider.id}><Icon name="bike" size={14} /><small>{rider.name}</small></span>)}
+      {large && (
+        <div className="map-toolbar">
+          <div className="search-box"><Icon name="search" size={16} /><input onChange={(event) => updateFilter("search", event.target.value)} placeholder="Search rider, phone, area..." value={filters.search} /></div>
+          <select onChange={(event) => updateFilter("status", event.target.value)} value={filters.status}>
+            <option value="working">Working riders</option>
+            <option value="all">All riders</option>
+            {["available", "online", "busy", "on_break", "offline", "suspended"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}
+          </select>
+          <select onChange={(event) => updateFilter("assignment", event.target.value)} value={filters.assignment}>
+            <option value="all">All assignments</option>
+            <option value="assigned">Has active assignment</option>
+            <option value="unassigned">No active assignment</option>
+          </select>
+        </div>
+      )}
+      <div className="admin-map-canvas-wrap">
+        <div className="admin-map-canvas" ref={mapNodeRef} />
+        {locatedRiders.length === 0 && <p className="map-empty">No rider GPS locations match this view.</p>}
+        <div className="map-legend">
+          <span><i className="fresh" /> Fresh</span>
+          <span><i className="warning" /> 31-120s</span>
+          <span><i className="stale" /> Stale</span>
+        </div>
+      </div>
+      <aside className={`map-detail-panel ${large ? "" : "compact"}`}>
+        <div className="map-stat-grid">
+          <div><small>VISIBLE</small><strong>{visibleRiders.length}</strong></div>
+          <div><small>LOCATED</small><strong>{locatedRiders.length}</strong></div>
+          <div><small>STALE</small><strong>{staleCount}</strong></div>
+        </div>
+        <div className="map-freshness-bar" aria-hidden="true">
+          <span className="fresh" style={{ flexGrow: freshCount || 0.2 }} />
+          <span className="warning" style={{ flexGrow: warningCount || 0.2 }} />
+          <span className="stale" style={{ flexGrow: staleCount || 0.2 }} />
+        </div>
+        {selectedRider ? (
+          <div className="map-rider-detail">
+            <div className="card-row">
+              <div><p className="eyebrow">SELECTED RIDER</p><h3>{selectedRider.name}</h3></div>
+              <StatusBadge status={selectedRider.status} />
+            </div>
+            <div className="detail-row"><span>Last update</span><strong>{locationAgeLabel(selectedRider.currentLocation?.recordedAt)}</strong></div>
+            <div className="detail-row"><span>Accuracy</span><strong>{selectedRider.currentLocation?.accuracy ? `${Math.round(selectedRider.currentLocation.accuracy)}m` : "Unknown"}</strong></div>
+            <div className="detail-row"><span>Active orders</span><strong>{selectedOrders.length}</strong></div>
+            <div className="detail-row"><span>Battery</span><strong>{selectedRider.currentLocation?.batteryPercent ?? "Unknown"}</strong></div>
+            {selectedRider.currentLocation && (
+              <div className="detail-row"><span>Position</span><strong>{selectedRider.currentLocation.latitude.toFixed(5)}, {selectedRider.currentLocation.longitude.toFixed(5)}</strong></div>
+            )}
+            {large && (
+              <div className="map-order-list">
+                {selectedOrders.map((order) => (
+                  <button key={order.id} onClick={() => onSelectOrder?.(order.id)} type="button">
+                    <span><strong>{order.id}</strong><small>{order.pickup} to {order.destination}</small></span>
+                    <StatusBadge status={order.status} />
+                  </button>
+                ))}
+                {selectedOrders.length === 0 && <p className="muted">No active assignment for this rider.</p>}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="map-empty-detail">No rider selected.</p>
+        )}
+      </aside>
     </div>
   );
 }

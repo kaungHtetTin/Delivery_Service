@@ -10,3 +10,15 @@ createRoot(root).render(
     <DeliveryApp apiBaseUrl={root.dataset.apiBaseUrl} initialPortal={root.dataset.portal} />
   </StrictMode>,
 );
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js")
+      .then((registration) => {
+        console.info("[pwa] service_worker_registered", { scope: registration.scope });
+      })
+      .catch((error) => {
+        console.warn("[pwa] service_worker_failed", { message: error.message });
+      });
+  });
+}
