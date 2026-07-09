@@ -109,7 +109,7 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
-    public function test_office_cannot_assign_a_busy_rider()
+    public function test_office_can_assign_a_busy_rider()
     {
         $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
 
@@ -119,13 +119,14 @@ class DeliveryOrderApiTest extends TestCase
         $this->postJson("/api/delivery-orders/{$order->id}/assign", [
             'rider_id' => $rider->id,
         ])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('rider_id');
+            ->assertOk()
+            ->assertJsonPath('status', 'rider_assigned')
+            ->assertJsonPath('rider.id', $rider->id);
 
         $this->assertDatabaseHas('delivery_orders', [
             'id' => $order->id,
-            'status' => 'pending',
-            'rider_id' => null,
+            'status' => 'rider_assigned',
+            'rider_id' => $rider->id,
         ]);
     }
 

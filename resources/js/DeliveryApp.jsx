@@ -418,7 +418,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     const assignedOrder = await assignDeliveryOrder(order, rider);
 
     setOrders((current) => current.map((item) => item.id === orderId ? assignedOrder : item));
-    setRiders((current) => current.map((rider) => rider.id === riderId ? { ...rider, status: "busy", activeOrders: rider.activeOrders + 1 } : rider));
+    setRiders(await fetchRiders());
     setNotifications(await fetchNotifications());
     setReportData(await fetchReportSummary());
   };

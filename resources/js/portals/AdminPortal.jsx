@@ -1914,7 +1914,7 @@ function OrderDrawer({ order, riders, close, onAssign, onDelete, onEdit }) {
 function AssignmentModal({ order, riders, close, onAssign }) {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
-  const assignableStatuses = new Set(["available", "online"]);
+  const assignableStatuses = new Set(["available", "online", "busy"]);
   const normalizedSearch = search.trim().toLowerCase();
   const filteredRiders = normalizedSearch
     ? riders.filter((rider) => [
@@ -1938,7 +1938,7 @@ function AssignmentModal({ order, riders, close, onAssign }) {
           {filteredRiders.length === 0 && <p className="muted assignment-empty">No riders match this search.</p>}
           {filteredRiders.map((rider) => (
             <button className={selected === rider.id ? "selected" : ""} disabled={!assignableStatuses.has(rider.status)} key={rider.id} onClick={() => setSelected(rider.id)} type="button">
-              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} active - {assignableStatuses.has(rider.status) ? rider.lastSeen : "not available"}</small></span><StatusBadge status={rider.status} />
+              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} processing order{rider.activeOrders === 1 ? "" : "s"} - {assignableStatuses.has(rider.status) ? rider.lastSeen : "not assignable"}</small></span><StatusBadge status={rider.status} />
             </button>
           ))}
         </div>

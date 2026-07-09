@@ -291,9 +291,9 @@ class DeliveryOrderController extends Controller
 
         $rider = Rider::findOrFail($validated['rider_id']);
 
-        if (! in_array($rider->status, ['available', 'online'], true)) {
+        if (! in_array($rider->status, ['available', 'online', 'busy'], true)) {
             throw ValidationException::withMessages([
-                'rider_id' => 'Select a rider who is currently available.',
+                'rider_id' => 'Select a rider who is online, available, or currently processing orders.',
             ]);
         }
 
