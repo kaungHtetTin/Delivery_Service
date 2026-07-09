@@ -20,6 +20,8 @@ export function loadConfig(env = process.env) {
     nodeEnv: env.NODE_ENV || "development",
     publishRateLimit: Number(env.PUBLISH_RATE_LIMIT || 120),
     publishRateWindowMs: Number(env.PUBLISH_RATE_WINDOW_MS || 60000),
+    pingInterval: Number(env.SOCKET_PING_INTERVAL_MS || 25000),
+    pingTimeout: Number(env.SOCKET_PING_TIMEOUT_MS || 60000),
   };
 }
 
@@ -52,6 +54,12 @@ export function createRealtimeServer(config = loadConfig()) {
   const corsOptions = createCorsOptions(config);
   const io = new Server(server, {
     cors: corsOptions,
+    pingInterval: Number(config.pingInterval || 25000),
+    pingTimeout: Number(config.pingTimeout || 60000),
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 120000,
+      skipMiddlewares: false,
+    },
   });
   const publishRateLimiter = createRateLimiter({
     limit: config.publishRateLimit,
@@ -242,6 +250,8 @@ export function start(config = loadConfig()) {
       nodeEnv: config.nodeEnv,
       publishRateLimit: config.publishRateLimit,
       publishRateWindowMs: config.publishRateWindowMs,
+      pingInterval: Number(config.pingInterval || 25000),
+      pingTimeout: Number(config.pingTimeout || 60000),
     });
   });
 

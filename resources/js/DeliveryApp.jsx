@@ -85,6 +85,7 @@ const portalNames = {
   rider: "Rider",
   admin: "Office",
 };
+const emptyRealtimeRecords = [];
 const demoAccounts = {
   client: ["client@example.test", "Client account"],
   rider: ["rider@example.test", "Rider account"],
@@ -137,6 +138,22 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   }, [appBaseUrl]);
   const requiredRoles = portalRoles[portal];
   const hasPortalAccess = auth?.user && requiredRoles.includes(auth.user.role);
+  const realtimeOrderIds = useMemo(
+    () => orders
+      .map((order) => order._apiId)
+      .filter(Boolean)
+      .map(String)
+      .sort((first, second) => first.localeCompare(second))
+      .join("|"),
+    [orders],
+  );
+  const realtimeOrders = useMemo(
+    () => realtimeOrderIds
+      ? realtimeOrderIds.split("|").map((id) => ({ _apiId: id }))
+      : emptyRealtimeRecords,
+    [realtimeOrderIds],
+  );
+  const realtimeRiders = portal === "admin" || portal === "client" ? emptyRealtimeRecords : riders;
 
   const clearAuth = () => {
     setAuth(null);
@@ -286,8 +303,8 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
 
         cleanup = createRealtimeConnection({
           auth,
-          orders,
-          riders,
+          orders: realtimeOrders,
+          riders: realtimeRiders,
           onRefresh: loadData,
           onStatusChange: setSocketStatus,
           socketToken: realtimeAuth.token,
@@ -303,8 +320,8 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
         });
         cleanup = createRealtimeConnection({
           auth,
-          orders,
-          riders,
+          orders: realtimeOrders,
+          riders: realtimeRiders,
           onRefresh: loadData,
           onStatusChange: setSocketStatus,
         });
@@ -314,7 +331,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
       cancelled = true;
       cleanup();
     };
-  }, [auth, hasPortalAccess, loadData, orders, riders]);
+  }, [auth, hasPortalAccess, loadData, realtimeOrders, realtimeRiders]);
 
   const submitOrder = async (order) => {
     const submittedOrder = await createDeliveryOrder(order);

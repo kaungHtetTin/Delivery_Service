@@ -28,6 +28,12 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
   }
 
   let refreshTimer = null;
+  let active = true;
+  const updateStatus = (status) => {
+    if (active) {
+      onStatusChange?.(status);
+    }
+  };
   const scheduleRefresh = (eventName, payload) => {
     window.clearTimeout(refreshTimer);
     refreshTimer = window.setTimeout(() => {
@@ -45,13 +51,26 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
     signed: Boolean(socketToken),
   });
 
-  onStatusChange?.("connecting");
+  updateStatus("connecting");
 
   const socket = io(socketUrl, {
     auth: socketToken ? { token: socketToken } : socketAuth,
     transports: ["websocket", "polling"],
-    reconnectionAttempts: 10,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 10000,
+    randomizationFactor: 0.5,
+  });
+
+  socket.io.on("reconnect_attempt", (attempt) => {
+    console.info("[realtime] reconnect_attempt", { attempt });
+    updateStatus("connecting");
+  });
+
+  socket.io.on("reconnect_error", (error) => {
+    console.warn("[realtime] reconnect_error", { message: error.message });
+    updateStatus("disconnected");
   });
 
   socket.on("connect", () => {
@@ -59,7 +78,17 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
       socketId: socket.id,
       transport: socket.io.engine.transport.name,
     });
-    onStatusChange?.("connected");
+    updateStatus("connected");
+    socketAuth.orderIds.forEach((orderId) => {
+      socket.emit("order:watch", orderId, (response) => {
+        if (response?.ok === false) {
+          console.warn("[realtime] order_watch_failed", {
+            orderId,
+            message: response.message,
+          });
+        }
+      });
+    });
   });
 
   socket.on("connect_error", (error) => {
@@ -68,12 +97,12 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
       description: error.description,
       context: error.context,
     });
-    onStatusChange?.("disconnected");
+    updateStatus("disconnected");
   });
 
   socket.on("disconnect", (reason) => {
     console.info("[realtime] disconnected", { reason });
-    onStatusChange?.("disconnected");
+    updateStatus("disconnected");
   });
 
   socket.on("socket:ready", (payload) => {
@@ -88,9 +117,9 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
   });
 
   return () => {
+    active = false;
     window.clearTimeout(refreshTimer);
     realtimeEvents.forEach((eventName) => socket.off(eventName));
-    onStatusChange?.("disconnected");
     socket.disconnect();
   };
 }
