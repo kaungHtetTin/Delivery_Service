@@ -24,7 +24,7 @@ class OrderActivityNotification extends Notification
     {
         $channels = ['database'];
 
-        if (config('services.firebase.push_enabled')) {
+        if (filter_var(config('services.firebase.push_enabled'), FILTER_VALIDATE_BOOL)) {
             $channels[] = FirebasePushChannel::class;
         }
 

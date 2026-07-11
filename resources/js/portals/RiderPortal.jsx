@@ -67,7 +67,7 @@ function shouldDropQueuedLocation(error) {
   return discardableFields.some((field) => validationErrors[field]);
 }
 
-export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enablePushAlerts, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, pushStatus, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
+export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enablePushAlerts, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onRefresh, onStartActive, onStopActive, onThemeChange, orders, progressOrder, pushStatus, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
@@ -89,7 +89,7 @@ export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enabl
   if (!rider) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onRefresh={onRefresh} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
         <main className="mobile-content">
           <MobilePlaceholder icon="bike" title="No rider profile" />
         </main>
@@ -102,7 +102,7 @@ export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enabl
 
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onRefresh={onRefresh} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
         <main className="mobile-content">
           <RiderJobDetail
             gpsTracking={gpsTracking}
@@ -121,7 +121,7 @@ export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enabl
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onNotifications={() => setPage("notifications")} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
+      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onNotifications={() => setPage("notifications")} onRefresh={onRefresh} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
       <main className="mobile-content">
         {page === "jobs" && <RiderJobs gpsTracking={gpsTracking} onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
-import { formatSettingValue, sendPushBroadcast, settingValueForInput } from "../api";
+import { fetchPushLogs, formatSettingValue, sendPushBroadcast, settingValueForInput } from "../api";
 import { activeStatuses, currentMonthDateRange, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, NotificationList, SocketStatusBadge, StatusBadge } from "../components/shared";
 import { AdminReports } from "./admin/AdminReports";
@@ -120,6 +120,7 @@ export function AdminPortal({
   markNotificationRead,
   mapTileUrl,
   notifications = [],
+  onRefresh,
   onRefreshFinance,
   removeCommissionRule,
   removeFinanceCategory,
@@ -251,6 +252,7 @@ export function AdminPortal({
         ["orders", "box", "Orders"],
         ["notifications", "bell", "Alerts", unreadCount],
         ["broadcast", "bell", "Broadcast"],
+        ["push-logs", "bell", "Push logs"],
         ["collections", "wallet", "Fee collections"],
         ["tracking", "mapPin", "Tracking map"],
       ],
@@ -315,6 +317,7 @@ export function AdminPortal({
           <div className="topbar-actions">
             <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
             <SocketStatusBadge status={socketStatus} />
+            <button aria-label="Refresh" className="icon-btn" onClick={onRefresh} title="Refresh" type="button"><Icon name="refresh" /></button>
             <DayNightToggle onChange={onThemeChange} theme={theme} />
             <button aria-label={`${unreadCount} unread alerts`} className="icon-btn notification-btn" onClick={() => setPage("notifications")} type="button">
               <Icon name="bell" />
@@ -383,6 +386,7 @@ export function AdminPortal({
             />
           )}
           {activePage === "broadcast" && <PushBroadcastAdmin />}
+          {activePage === "push-logs" && <PushLogsAdmin />}
           {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} onView={(rider) => { setSelectedRiderId(rider.id); setPage("rider-detail"); }} pagination={ridersPagination} riders={ridersPagination.items} />}
           {activePage === "rider-detail" && (
             <RiderDetailPage
@@ -424,7 +428,7 @@ export function AdminPortal({
           {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large mapTileUrl={mapTileUrl} onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
           {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
-          {!["dashboard", "orders", "notifications", "broadcast", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
+          {!["dashboard", "orders", "notifications", "broadcast", "push-logs", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
         </div>
       </main>
       {selectedOrder && (
@@ -620,6 +624,120 @@ function PushBroadcastAdmin() {
       </form>
     </section>
   );
+}
+
+function PushLogsAdmin() {
+  const [entries, setEntries] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [limit, setLimit] = useState(100);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadLogs = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetchPushLogs({ limit });
+      setEntries(response.entries);
+      setSummary(response.summary);
+    } catch (logError) {
+      setError(logError?.payload?.message || logError?.message || "Could not load push logs.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  const subscriptionsByRole = summary.subscriptions_by_role || {};
+  const configReady = summary.push_enabled && summary.has_project_id && summary.has_client_email && summary.has_private_key;
+
+  return (
+    <section className="panel glass push-log-page">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">PUSH TRACE</p>
+          <h2>Firebase push logs</h2>
+        </div>
+        <div className="push-log-actions">
+          <select onChange={(event) => setLimit(Number(event.target.value))} value={limit}>
+            <option value={50}>50 rows</option>
+            <option value={100}>100 rows</option>
+            <option value={200}>200 rows</option>
+            <option value={300}>300 rows</option>
+          </select>
+          <button className="btn secondary" disabled={loading} onClick={loadLogs} type="button">
+            <Icon name="refresh" size={15} />
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      <div className="push-log-summary">
+        <div>
+          <small>Firebase config</small>
+          <strong className={configReady ? "ok" : "bad"}>{configReady ? "Ready" : "Check config"}</strong>
+        </div>
+        <div>
+          <small>Push enabled</small>
+          <strong className={summary.push_enabled ? "ok" : "bad"}>{summary.push_enabled ? "Yes" : "No"}</strong>
+        </div>
+        <div>
+          <small>Saved devices</small>
+          <strong>{summary.subscriptions || 0}</strong>
+        </div>
+        <div>
+          <small>By role</small>
+          <strong>{Object.entries(subscriptionsByRole).map(([role, total]) => `${role}: ${total}`).join(", ") || "None"}</strong>
+        </div>
+      </div>
+
+      {error && <p className="auth-error">{error}</p>}
+
+      <div className="table-wrap">
+        <table className="push-log-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Level</th>
+              <th>Message</th>
+              <th>Context</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry, index) => (
+              <tr key={`${entry.timestamp || "line"}-${index}`}>
+                <td><small>{entry.timestamp || entry.file}</small></td>
+                <td><span className={`status status-${logLevelFamily(entry.level)}`}>{entry.level || "log"}</span></td>
+                <td><strong>{entry.message}</strong><small>{entry.file}</small></td>
+                <td>
+                  {entry.context
+                    ? <pre className="log-context">{JSON.stringify(entry.context, null, 2)}</pre>
+                    : <small>No context</small>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!entries.length && !loading && <p className="muted table-empty">No Firebase push log entries found yet.</p>}
+    </section>
+  );
+}
+
+function logLevelFamily(level = "") {
+  if (["error", "critical", "alert", "emergency"].includes(level)) {
+    return "danger";
+  }
+
+  if (["warning", "notice"].includes(level)) {
+    return "warning";
+  }
+
+  return "info";
 }
 
 function userInitials(user) {

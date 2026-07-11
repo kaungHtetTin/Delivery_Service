@@ -80,6 +80,7 @@ Route::middleware(['auth:sanctum', 'role:client,office_admin,super_admin'])->gro
 
 Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(function () {
     Route::post('notifications/broadcast', [NotificationController::class, 'broadcast']);
+    Route::get('notifications/push-logs', [NotificationController::class, 'pushLogs']);
     Route::post('delivery-orders/{deliveryOrder}/assign', [DeliveryOrderController::class, 'assign']);
     Route::get('finance/transactions/summary', [FinanceTransactionController::class, 'summary']);
     Route::apiResource('finance/categories', FinanceCategoryController::class)

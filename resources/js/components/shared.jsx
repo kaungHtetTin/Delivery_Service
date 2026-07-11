@@ -77,18 +77,25 @@ function countBadgeLabel(count) {
   return count > 99 ? "99+" : String(count);
 }
 
-export function MobileTopbar({ appIconUrl = "", appName, onNotifications, onThemeChange, socketStatus = "disconnected", theme = "light", title, unreadCount = 0 }) {
+export function MobileTopbar({ appIconUrl = "", appName, onNotifications, onRefresh, onThemeChange, socketStatus = "disconnected", theme = "light", title, unreadCount = 0 }) {
   return (
     <header className="mobile-topbar glass">
       <Logo appIconUrl={appIconUrl} appName={appName} />
       {title && <span className="topbar-title">{title}</span>}
       <div className="topbar-actions">
         <SocketStatusBadge status={socketStatus} />
+        {onRefresh && (
+          <button aria-label="Refresh" className="icon-btn" onClick={onRefresh} title="Refresh" type="button">
+            <Icon name="refresh" />
+          </button>
+        )}
         <DayNightToggle onChange={onThemeChange} theme={theme} />
-        <button aria-label="Notifications" className="icon-btn notification-btn" onClick={onNotifications} type="button">
-          <Icon name="bell" />
-          {unreadCount > 0 && <span>{countBadgeLabel(unreadCount)}</span>}
-        </button>
+        {onNotifications && (
+          <button aria-label="Notifications" className="icon-btn notification-btn" onClick={onNotifications} type="button">
+            <Icon name="bell" />
+            {unreadCount > 0 && <span>{countBadgeLabel(unreadCount)}</span>}
+          </button>
+        )}
       </div>
     </header>
   );

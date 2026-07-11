@@ -30,6 +30,7 @@ const paths = {
   lock: "M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5V11Zm7 4v2",
   menu: "M4 6h16M4 12h16M4 18h16",
   mail: "M4 6h16v12H4V6Zm0 0 8 6 8-6",
+  refresh: "M20 6v5h-5m4.2-.8A7.5 7.5 0 0 0 5 7m-1 11v-5h5m-4.2.8A7.5 7.5 0 0 0 19 17",
 };
 
 export function Icon({ name, size = 18, className = "" }) {

@@ -998,6 +998,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
             mapTileUrl={mapTileUrl}
             notifications={notifications}
             onLogout={handleLogout}
+            onRefresh={loadData}
             onThemeChange={setTheme}
             orders={orders}
             pushStatus={pushStatus}
@@ -1029,6 +1030,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           onGpsEvent={reportRiderGpsEvent}
           onLocation={reportRiderLocation}
           onLogout={handleLogout}
+          onRefresh={loadData}
           onStartActive={startRiderDuty}
           onStopActive={stopRiderDuty}
           onThemeChange={setTheme}
@@ -1058,6 +1060,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           markNotificationRead={markNotificationRead}
           mapTileUrl={mapTileUrl}
           notifications={notifications}
+          onRefresh={loadData}
           onRefreshFinance={refreshFinanceData}
           onThemeChange={setTheme}
           orders={orders}

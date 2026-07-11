@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Notifications\BroadcastPushNotification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 
 class NotificationController extends Controller
 {
@@ -50,6 +52,14 @@ class NotificationController extends Controller
             ]
         );
 
+        Log::info('[firebase] push_subscription_saved', [
+            'user_id' => $request->user()->id,
+            'role' => $request->user()->role,
+            'subscription_id' => $subscription->id,
+            'token_hash' => hash('sha256', $validated['token']),
+            'platform' => $subscription->platform,
+        ]);
+
         return response()->json($subscription);
     }
 
@@ -59,10 +69,17 @@ class NotificationController extends Controller
             'token' => ['required', 'string', 'max:512'],
         ]);
 
-        $request->user()
+        $deleted = $request->user()
             ->pushSubscriptions()
             ->where('token', $validated['token'])
             ->delete();
+
+        Log::info('[firebase] push_subscription_removed', [
+            'user_id' => $request->user()->id,
+            'role' => $request->user()->role,
+            'token_hash' => hash('sha256', $validated['token']),
+            'deleted' => $deleted,
+        ]);
 
         return response()->json(['message' => 'Push subscription removed.']);
     }
@@ -103,5 +120,87 @@ class NotificationController extends Controller
                 ->whereIn('user_id', $users->pluck('id'))
                 ->count(),
         ]);
+    }
+
+    public function pushLogs(Request $request): JsonResponse
+    {
+        $limit = min(max($request->integer('limit', 100), 1), 300);
+        $entries = [];
+
+        foreach ($this->logFiles() as $file) {
+            foreach (array_reverse(file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) as $line) {
+                if (! str_contains($line, '[firebase]')) {
+                    continue;
+                }
+
+                $entries[] = $this->parseLogLine($line, $file);
+
+                if (count($entries) >= $limit) {
+                    break 2;
+                }
+            }
+        }
+
+        return response()->json([
+            'data' => $entries,
+            'summary' => [
+                'push_enabled' => filter_var(config('services.firebase.push_enabled'), FILTER_VALIDATE_BOOL),
+                'has_project_id' => filled(config('services.firebase.project_id')),
+                'has_client_email' => filled(config('services.firebase.client_email')),
+                'has_private_key' => filled(config('services.firebase.private_key')),
+                'subscriptions' => PushSubscription::query()->count(),
+                'subscriptions_by_role' => PushSubscription::query()
+                    ->join('users', 'users.id', '=', 'push_subscriptions.user_id')
+                    ->selectRaw('users.role, count(*) as total')
+                    ->groupBy('users.role')
+                    ->pluck('total', 'users.role'),
+            ],
+        ]);
+    }
+
+    private function logFiles(): array
+    {
+        return collect(File::glob(storage_path('logs/laravel*.log')) ?: [])
+            ->filter(fn (string $file) => File::isFile($file))
+            ->sortByDesc(fn (string $file) => File::lastModified($file))
+            ->values()
+            ->all();
+    }
+
+    private function parseLogLine(string $line, string $file): array
+    {
+        $entry = [
+            'timestamp' => null,
+            'environment' => null,
+            'level' => null,
+            'message' => $line,
+            'context' => null,
+            'file' => basename($file),
+        ];
+
+        if (! preg_match('/^\[(?<timestamp>[^\]]+)\]\s+(?<environment>[^.]+)\.(?<level>[^:]+):\s+(?<body>.*)$/', $line, $matches)) {
+            return $entry;
+        }
+
+        $body = $matches['body'];
+        $context = null;
+
+        if (preg_match('/^(?<message>.*?)\s+(?<context>\{.*\})$/', $body, $bodyMatches)) {
+            $decoded = json_decode($bodyMatches['context'], true);
+
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $body = $bodyMatches['message'];
+                $context = $decoded;
+            }
+        }
+
+        return [
+            'timestamp' => $matches['timestamp'],
+            'environment' => $matches['environment'],
+            'level' => strtolower($matches['level']),
+            'message' => $body,
+            'context' => $context,
+            'file' => basename($file),
+        ];
     }
 }

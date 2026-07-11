@@ -21,6 +21,7 @@ use Database\Seeders\DeliveryDemoSeeder;
 use Database\Seeders\SystemSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -2356,6 +2357,36 @@ class DeliveryOrderApiTest extends TestCase
             'user_id' => $user->id,
             'token' => $token,
         ]);
+    }
+
+    public function test_office_can_view_firebase_push_logs()
+    {
+        $client = $this->createUser([
+            'email' => 'push-log-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $client->pushSubscriptions()->create([
+            'token' => str_repeat('client-push-token-', 20),
+            'platform' => 'web',
+            'user_agent' => 'Feature test',
+            'last_seen_at' => now(),
+        ]);
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $logFile = storage_path('logs/laravel-push-test.log');
+        File::ensureDirectoryExists(dirname($logFile));
+        File::put($logFile, '[2026-07-12 10:00:00] testing.INFO: [firebase] push_send_success {"project_id":"demo","token_hash":"abc"}' . PHP_EOL);
+
+        try {
+            $this->getJson('/api/notifications/push-logs?limit=10')
+                ->assertOk()
+                ->assertJsonPath('data.0.message', '[firebase] push_send_success')
+                ->assertJsonPath('data.0.context.project_id', 'demo')
+                ->assertJsonPath('summary.subscriptions', 1)
+                ->assertJsonPath('summary.subscriptions_by_role.client', 1);
+        } finally {
+            File::delete($logFile);
+        }
     }
 
     public function test_office_receives_delivery_workflow_notifications()

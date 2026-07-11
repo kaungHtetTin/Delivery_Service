@@ -6,12 +6,13 @@ use App\Models\PushSubscription;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class FirebaseCloudMessaging
 {
     public function enabled(): bool
     {
-        return (bool) config('services.firebase.push_enabled')
+        return filter_var(config('services.firebase.push_enabled'), FILTER_VALIDATE_BOOL)
             && filled(config('services.firebase.project_id'))
             && filled(config('services.firebase.client_email'))
             && filled(config('services.firebase.private_key'));
@@ -20,27 +21,63 @@ class FirebaseCloudMessaging
     public function sendToTokens(iterable $tokens, array $message): void
     {
         if (! $this->enabled()) {
+            Log::warning('[firebase] push_send_skipped', [
+                'reason' => 'disabled_or_unconfigured',
+                'push_enabled' => filter_var(config('services.firebase.push_enabled'), FILTER_VALIDATE_BOOL),
+                'has_project_id' => filled(config('services.firebase.project_id')),
+                'has_client_email' => filled(config('services.firebase.client_email')),
+                'has_private_key' => filled(config('services.firebase.private_key')),
+            ]);
+
             return;
         }
 
-        $accessToken = $this->accessToken();
+        try {
+            $accessToken = $this->accessToken();
+        } catch (Throwable $exception) {
+            Log::error('[firebase] access_token_failed', [
+                'message' => $exception->getMessage(),
+                'project_id' => config('services.firebase.project_id'),
+            ]);
+
+            return;
+        }
+
         $projectId = config('services.firebase.project_id');
         $endpoint = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
 
         foreach (collect($tokens)->filter()->unique() as $token) {
-            $response = Http::withToken($accessToken)
-                ->timeout((int) config('services.firebase.timeout', 5))
-                ->post($endpoint, [
-                    'message' => $this->payload($token, $message),
+            try {
+                $response = Http::withToken($accessToken)
+                    ->timeout((int) config('services.firebase.timeout', 5))
+                    ->post($endpoint, [
+                        'message' => $this->payload($token, $message),
+                    ]);
+            } catch (Throwable $exception) {
+                Log::error('[firebase] push_send_exception', [
+                    'message' => $exception->getMessage(),
+                    'token_hash' => hash('sha256', $token),
+                    'project_id' => $projectId,
                 ]);
 
+                continue;
+            }
+
             if ($response->successful()) {
+                Log::info('[firebase] push_send_success', [
+                    'token_hash' => hash('sha256', $token),
+                    'project_id' => $projectId,
+                    'title' => $message['title'] ?? config('app.name'),
+                ]);
+
                 continue;
             }
 
             Log::warning('[firebase] push_send_failed', [
                 'status' => $response->status(),
                 'body' => $response->json(),
+                'token_hash' => hash('sha256', $token),
+                'project_id' => $projectId,
             ]);
 
             if (in_array($response->status(), [400, 404], true)) {

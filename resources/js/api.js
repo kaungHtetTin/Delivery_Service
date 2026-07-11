@@ -329,6 +329,15 @@ export async function sendPushBroadcast(payload) {
   });
 }
 
+export async function fetchPushLogs({ limit = 100 } = {}) {
+  const response = await request(`/notifications/push-logs?limit=${encodeURIComponent(limit)}`);
+
+  return {
+    summary: response.summary || {},
+    entries: response.data || [],
+  };
+}
+
 export function mapOrder(order) {
   return {
     _apiId: order.id,
