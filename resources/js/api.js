@@ -285,8 +285,7 @@ export function mapNotification(notification) {
 }
 
 export async function fetchNotifications() {
-  const response = await request("/notifications?per_page=50");
-  return response.data.map(mapNotification);
+  return requestAllPages("/notifications", mapNotification, { perPage: 50 });
 }
 
 export async function fetchRealtimeToken() {

@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { statusLabels } from "../data";
 import { activeStatuses, currentDateLabel, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
-import { AddressBlock, MobileNav, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
+import { AccountHealthPanel, AddressBlock, InfiniteListFooter, MobileNav, MobileTopbar, NotificationList, StatusBadge, useInfiniteList } from "../components/shared";
 
 const canModifyPendingOrder = (order) => order?.status === "pending";
 const clientLiveTrackingStatuses = new Set(["picked_up", "going_to_delivery", "arrived_at_delivery", "delivered"]);
@@ -133,6 +133,8 @@ export function ClientPortal({ addresses = [], appIconUrl = "", appName, contact
             setDefaultAddress={setDefaultAddress}
             setDefaultShop={setDefaultShop}
             shops={shops}
+            pushStatus={pushStatus}
+            socketStatus={socketStatus}
             user={user}
           />
         )}
@@ -268,6 +270,10 @@ function ClientOrders({ orders, onDelete, onEdit, onTrack }) {
 
     return matchesSearch && matchesFilter;
   });
+  const pagedOrders = useInfiniteList(filteredOrders, {
+    pageSize: 8,
+    resetKey: `${filter}:${search}:${filteredOrders.map((order) => order.id).join("|")}`,
+  });
 
   return (
     <section className="page-section">
@@ -294,7 +300,7 @@ function ClientOrders({ orders, onDelete, onEdit, onTrack }) {
             <p>Try another filter or order code.</p>
           </section>
         )}
-        {filteredOrders.map((order) => (
+        {pagedOrders.visibleItems.map((order) => (
           <article className="delivery-list-card glass" key={order.id}>
             <div className="card-row">
               <span className="order-code">{order.id}</span>
@@ -313,11 +319,18 @@ function ClientOrders({ orders, onDelete, onEdit, onTrack }) {
           </article>
         ))}
       </div>
+      <InfiniteListFooter
+        hasMore={pagedOrders.hasMore}
+        label="Load more deliveries"
+        onLoadMore={pagedOrders.loadMore}
+        showing={pagedOrders.showing}
+        total={pagedOrders.total}
+      />
     </section>
   );
 }
 
-function ClientAccount({ addresses, onLogout, removeAddress, removeShop, saveAddress, saveProfile, saveShop, setDefaultAddress, setDefaultShop, shops, user }) {
+function ClientAccount({ addresses, onLogout, pushStatus, removeAddress, removeShop, saveAddress, saveProfile, saveShop, setDefaultAddress, setDefaultShop, shops, socketStatus, user }) {
   const [profile, setProfile] = useState({
     name: user.name || "",
     phone: user.phone || "",
@@ -332,6 +345,7 @@ function ClientAccount({ addresses, onLogout, removeAddress, removeShop, saveAdd
     <section className="page-section">
       <p className="eyebrow">ACCOUNT</p>
       <h1>Your account</h1>
+      <AccountHealthPanel pushStatus={pushStatus} socketStatus={socketStatus} />
       <form
         className="account-panel glass"
         onSubmit={async (event) => {

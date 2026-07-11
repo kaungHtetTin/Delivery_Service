@@ -151,6 +151,9 @@ small { color: var(--color-muted); font-size: 11px; }
 .compact-list { overflow: hidden; border-radius: 8px; }
 .compact-row { display: flex; gap: 10px; width: 100%; min-height: 58px; padding: 10px 11px; color: var(--color-text); text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--color-border); align-items: center; }
 .compact-row:last-child { border-bottom: 0; }
+.infinite-list-footer { display: grid; gap: 6px; margin: 12px 0 4px; place-items: center; }
+.infinite-list-footer .btn { min-height: 38px; }
+.infinite-list-footer small { color: var(--color-muted); font-size: 10px; font-weight: 700; }
 .notification-row.unread { background: color-mix(in srgb, var(--color-primary) 7%, transparent); }
 .notification-row.unread .row-icon { color: var(--color-primary); background: var(--color-primary-soft); }
 .push-alert-panel { display: grid; gap: 10px; margin: 0 0 12px; padding: 11px; border-radius: 8px; grid-template-columns: 34px 1fr auto; align-items: center; }
@@ -225,6 +228,9 @@ small { color: var(--color-muted); font-size: 11px; }
 .review-section { display: grid; gap: 3px; margin-bottom: 9px; padding: 11px; border-radius: 7px; }
 .review-section strong { margin-top: 3px; font-size: 13px; }
 .account-panel { display: grid; gap: 0; padding: 13px; border-radius: 8px; }
+.account-health-panel { margin: 0 0 12px; padding: 12px; border-radius: 8px; }
+.account-health-panel .section-heading { margin-bottom: 8px; }
+.account-health-panel .compact-list { background: var(--color-surface); border: 1px solid var(--color-border); }
 .log-context { max-width: 460px; max-height: 160px; margin: 0; overflow: auto; padding: 8px; color: var(--color-text); background: var(--color-soft); border: 1px solid var(--color-border); border-radius: 6px; font-size: 11px; line-height: 1.35; white-space: pre-wrap; }
 .push-device-heading { margin-top: 10px; }
 .token-hash { display: block; max-width: 280px; overflow: hidden; color: var(--color-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

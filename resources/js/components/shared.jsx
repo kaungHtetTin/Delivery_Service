@@ -1,5 +1,70 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../icons";
 import { statusLabels } from "../data";
+
+const defaultInfinitePageSize = 10;
+
+export function useInfiniteList(items = [], { pageSize = defaultInfinitePageSize, resetKey = "" } = {}) {
+  const [visibleCount, setVisibleCount] = useState(pageSize);
+  const total = items.length;
+
+  useEffect(() => {
+    setVisibleCount(pageSize);
+  }, [pageSize, resetKey]);
+
+  const visibleItems = useMemo(
+    () => items.slice(0, Math.min(visibleCount, total)),
+    [items, total, visibleCount],
+  );
+  const hasMore = visibleItems.length < total;
+  const loadMore = () => {
+    setVisibleCount((current) => Math.min(current + pageSize, total));
+  };
+
+  return {
+    hasMore,
+    loadMore,
+    showing: visibleItems.length,
+    total,
+    visibleItems,
+  };
+}
+
+export function InfiniteListFooter({ hasMore, label = "Load more", onLoadMore, showing = 0, total = 0 }) {
+  const markerRef = useRef(null);
+
+  useEffect(() => {
+    if (!hasMore || !markerRef.current || typeof IntersectionObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          onLoadMore?.();
+        }
+      },
+      { rootMargin: "180px 0px" },
+    );
+
+    observer.observe(markerRef.current);
+
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore, showing, total]);
+
+  if (!hasMore) {
+    return null;
+  }
+
+  return (
+    <div className="infinite-list-footer" ref={markerRef}>
+      <button className="btn secondary full" onClick={onLoadMore} type="button">
+        {label}
+      </button>
+      <small>{showing} of {total}</small>
+    </div>
+  );
+}
 
 export function StatusBadge({ status }) {
   const family = ["completed", "delivered", "paid", "available"].includes(status)
@@ -169,8 +234,71 @@ function pushStatusContent(pushStatus) {
   return labels[pushStatus.state] || null;
 }
 
+function socketHealthContent(socketStatus) {
+  return socketStatus === "connected"
+    ? {
+        detail: "Realtime order updates are connected.",
+        health: "available",
+        label: "Online",
+      }
+    : {
+        detail: "Realtime updates are offline. Use refresh if updates look stale.",
+        health: "offline",
+        label: "Offline",
+      };
+}
+
+function pushHealthContent(pushStatus) {
+  const state = pushStatus?.state || "default";
+  const healthy = state === "enabled";
+  const warning = ["default", "disabled", "working"].includes(state);
+  const label =
+    state === "enabled" ? "Enabled" :
+      state === "blocked" ? "Blocked" :
+        state === "working" ? "Checking" :
+          state === "unconfigured" ? "Config needed" :
+            state === "unsupported" ? "Unsupported" :
+              state === "error" ? "Error" :
+                "Disabled";
+
+  return {
+    detail: pushStatus?.message || (healthy ? "Push alerts are enabled on this device." : "Push alerts are not enabled on this device."),
+    health: healthy ? "available" : warning ? "pending" : "failed",
+    label,
+  };
+}
+
+export function AccountHealthPanel({ pushStatus, socketStatus = "disconnected" }) {
+  const socket = socketHealthContent(socketStatus);
+  const push = pushHealthContent(pushStatus);
+
+  return (
+    <section className="account-health-panel glass">
+      <div className="section-heading">
+        <div><span className="eyebrow">HEALTH</span><h2>Connection status</h2></div>
+      </div>
+      <div className="compact-list">
+        <div className="compact-row">
+          <span className="row-icon"><Icon name="refresh" size={16} /></span>
+          <span className="row-content"><strong>Socket server</strong><small>{socket.detail}</small></span>
+          <StatusBadge status={socket.health} />
+        </div>
+        <div className="compact-row">
+          <span className="row-icon"><Icon name="bell" size={16} /></span>
+          <span className="row-content"><strong>Push notification</strong><small>{push.detail}</small></span>
+          <StatusBadge status={push.health} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function NotificationList({ notifications = [], onDisablePush, onEnablePush, onRead, pushStatus, title = "Notifications" }) {
   const pushContent = pushStatusContent(pushStatus);
+  const pagedNotifications = useInfiniteList(notifications, {
+    pageSize: 12,
+    resetKey: notifications.map((notification) => notification.id).join("|"),
+  });
   const canEnablePush = ["default", "disabled", "error"].includes(pushStatus?.state);
   const canDisablePush = pushStatus?.state === "enabled";
   const pushPanel = pushContent && (
@@ -214,7 +342,7 @@ export function NotificationList({ notifications = [], onDisablePush, onEnablePu
       <h1>{title}</h1>
       {pushPanel}
       <div className="compact-list glass">
-        {notifications.map((notification) => (
+        {pagedNotifications.visibleItems.map((notification) => (
           <button
             className={`compact-row notification-row ${notification.readAt ? "" : "unread"}`}
             key={notification.id}
@@ -230,6 +358,13 @@ export function NotificationList({ notifications = [], onDisablePush, onEnablePu
           </button>
         ))}
       </div>
+      <InfiniteListFooter
+        hasMore={pagedNotifications.hasMore}
+        label="Load more alerts"
+        onLoadMore={pagedNotifications.loadMore}
+        showing={pagedNotifications.showing}
+        total={pagedNotifications.total}
+      />
     </section>
   );
 }

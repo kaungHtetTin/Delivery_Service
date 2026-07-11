@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
 import { deliveryFeeCashDue, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { nextRiderActions } from "../data";
-import { AddressBlock, MobileNav, MobilePlaceholder, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
+import { AccountHealthPanel, AddressBlock, InfiniteListFooter, MobileNav, MobilePlaceholder, MobileTopbar, NotificationList, StatusBadge, useInfiniteList } from "../components/shared";
 import { bumpQueuedLocationRetry, countQueuedRiderLocations, enqueueRiderLocation, getQueuedRiderLocations, removeQueuedLocation } from "../offlineLocationQueue";
 import { closeRiderGpsStatusNotification, ensureGpsNotificationPermission, isInstalledPwa, showRiderGpsStatusNotification } from "../pwaGpsStatusNotification";
 
@@ -129,7 +129,7 @@ export function RiderPortal({ appBaseUrl = "", appIconUrl = "", appName, disable
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}
         {page === "gps" && <GpsStatus activeOrders={activeOrders} gpsTracking={gpsTracking} mapTileUrl={mapTileUrl} rider={rider} />}
         {page === "notifications" && <NotificationList notifications={notifications} onDisablePush={disablePushAlerts} onEnablePush={enablePushAlerts} onRead={markNotificationRead} pushStatus={pushStatus} title="Notifications" />}
-        {page === "account" && <RiderAccount onLogout={onLogout} rider={rider} saveProfile={saveProfile} user={user} />}
+        {page === "account" && <RiderAccount onLogout={onLogout} pushStatus={pushStatus} rider={rider} saveProfile={saveProfile} socketStatus={socketStatus} user={user} />}
       </main>
       <MobileNav
         active={page}
@@ -165,7 +165,7 @@ function RiderProfileAvatar({ previewUrl = "", rider, user }) {
     : <span className="profile-avatar large">{riderUserInitials(user, rider)}</span>;
 }
 
-function RiderAccount({ onLogout, rider, saveProfile, user }) {
+function RiderAccount({ onLogout, pushStatus, rider, saveProfile, socketStatus, user }) {
   const [form, setForm] = useState({
     name: user?.name || rider?.name || "",
     email: user?.email || rider?.email || "",
@@ -246,6 +246,7 @@ function RiderAccount({ onLogout, rider, saveProfile, user }) {
     <section className="page-section rider-account-page">
       <p className="eyebrow">ACCOUNT</p>
       <h1>Rider profile</h1>
+      <AccountHealthPanel pushStatus={pushStatus} socketStatus={socketStatus} />
       <form className="account-panel glass rider-account-form" onSubmit={handleSubmit}>
         <div className="profile-summary glass">
           <RiderProfileAvatar previewUrl={photoPreview} rider={rider} user={user} />
@@ -786,6 +787,10 @@ function RiderJobs({ gpsTracking, onOpen, orders, rider }) {
   const queueLabel = gpsTracking.queuedCount > 0
     ? `, ${gpsTracking.queuedCount} queued`
     : "";
+  const pagedOrders = useInfiniteList(orders, {
+    pageSize: 8,
+    resetKey: orders.map((order) => order.id).join("|"),
+  });
 
   return (
     <>
@@ -809,7 +814,7 @@ function RiderJobs({ gpsTracking, onOpen, orders, rider }) {
         <div className="section-heading"><div><span className="eyebrow">TODAY</span><h2>Active assignments</h2></div></div>
         <div className="delivery-list">
           {orders.length === 0 && <MobilePlaceholder icon="box" title="No active assignments" />}
-          {orders.map((order) => (
+          {pagedOrders.visibleItems.map((order) => (
             <button className="delivery-list-card rider-job glass" key={order.id} onClick={() => onOpen(order.id)} type="button">
               <div className="card-row"><span className="order-code">{order.id}</span><StatusBadge status={order.status} /></div>
               <AddressBlock from={order.pickup} to={order.destination} />
@@ -821,6 +826,13 @@ function RiderJobs({ gpsTracking, onOpen, orders, rider }) {
             </button>
           ))}
         </div>
+        <InfiniteListFooter
+          hasMore={pagedOrders.hasMore}
+          label="Load more jobs"
+          onLoadMore={pagedOrders.loadMore}
+          showing={pagedOrders.showing}
+          total={pagedOrders.total}
+        />
       </section>
     </>
   );
@@ -831,6 +843,10 @@ function RiderHistory({ onOpen, orders }) {
   const filteredOrders = filter === "all" ? orders : orders.filter((order) => order.status === filter);
   const completedCount = orders.filter((order) => order.status === "completed").length;
   const deliveryFeesTotal = filteredOrders.reduce((total, order) => total + deliveryFeeCashDue(order), 0);
+  const pagedOrders = useInfiniteList(filteredOrders, {
+    pageSize: 8,
+    resetKey: `${filter}:${filteredOrders.map((order) => order.id).join("|")}`,
+  });
 
   return (
     <section className="page-section">
@@ -853,7 +869,7 @@ function RiderHistory({ onOpen, orders }) {
       </div>
       <div className="delivery-list">
         {filteredOrders.length === 0 && <MobilePlaceholder icon="clock" title="No matching history" />}
-        {filteredOrders.map((order) => (
+        {pagedOrders.visibleItems.map((order) => (
           <button className="delivery-list-card rider-job glass" key={order.id} onClick={() => onOpen(order.id)} type="button">
             <div className="card-row"><span className="order-code">{order.id}</span><StatusBadge status={order.status} /></div>
             <AddressBlock from={order.pickup} to={order.destination} />
@@ -865,6 +881,13 @@ function RiderHistory({ onOpen, orders }) {
           </button>
         ))}
       </div>
+      <InfiniteListFooter
+        hasMore={pagedOrders.hasMore}
+        label="Load more history"
+        onLoadMore={pagedOrders.loadMore}
+        showing={pagedOrders.showing}
+        total={pagedOrders.total}
+      />
     </section>
   );
 }
