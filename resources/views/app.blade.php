@@ -11,7 +11,8 @@
             name="description"
             content="Professional local delivery service management platform"
         >
-        <link rel="manifest" href="{{ url('/app.webmanifest') }}">
+        @php($manifestPortal = ($portal ?? 'client') === 'admin' ? 'office' : ($portal ?? 'client'))
+        <link rel="manifest" href="{{ route('app.manifest', ['portal' => $manifestPortal]) }}">
         <link rel="icon" href="{{ url('/flowdrop-icon.svg') }}" type="image/svg+xml">
         <link rel="apple-touch-icon" href="{{ url('/pwa-icon-192.png') }}">
         <title>FlowDrop Delivery</title>

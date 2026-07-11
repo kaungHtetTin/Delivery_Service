@@ -222,6 +222,16 @@ class DeliveryOrderController extends Controller
                 $this->deleteCompletedOrderNotifications($deliveryOrder);
             }
 
+            if (array_key_exists('status', $validated) && $validated['status'] !== $previousStatus) {
+                $this->notifyClient(
+                    $deliveryOrder,
+                    'status_updated',
+                    'Delivery status updated',
+                    "{$deliveryOrder->code} is now {$this->statusLabel($validated['status'])}.",
+                    ['status' => $validated['status']]
+                );
+            }
+
             if ($request->user()?->role === User::ROLE_CLIENT) {
                 $this->notifyOffice(
                     $deliveryOrder,

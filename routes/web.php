@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Http\Request;
 use App\Http\Controllers\MapTileController;
 use App\Models\SystemSetting;
 
@@ -19,13 +20,37 @@ Route::get('/', fn () => redirect()->route('client'));
 Route::get('/map-tiles/{z}/{x}/{y}', [MapTileController::class, 'show'])
     ->whereNumber(['z', 'x', 'y'])
     ->name('map-tiles.show');
-Route::get('/app.webmanifest', function () {
+Route::get('/app.webmanifest', function (Request $request) {
     $settings = SystemSetting::query()
         ->whereIn('key', ['app_name', 'brand_color', 'app_icon'])
         ->pluck('value', 'key');
     $appName = $settings->get('app_name') ?: 'FlowDrop Delivery';
     $brandColor = $settings->get('brand_color') ?: '#087f74';
     $appIcon = $settings->get('app_icon');
+    $portal = $request->query('portal', 'client');
+    $portal = in_array($portal, ['client', 'rider', 'office'], true) ? $portal : 'client';
+    $portalConfig = [
+        'client' => [
+            'label' => 'Client',
+            'short_name' => 'Client',
+            'description' => 'Create deliveries and receive delivery updates.',
+            'url' => url('/client'),
+        ],
+        'rider' => [
+            'label' => 'Rider',
+            'short_name' => 'Rider',
+            'description' => 'Manage assigned deliveries, GPS tracking, and rider alerts.',
+            'url' => url('/rider'),
+        ],
+        'office' => [
+            'label' => 'Office',
+            'short_name' => 'Office',
+            'description' => 'Manage delivery operations, riders, and office alerts.',
+            'url' => url('/office'),
+        ],
+    ];
+    $currentPortal = $portalConfig[$portal];
+    $manifestName = "{$appName} {$currentPortal['label']}";
     $icons = [
         [
             'src' => url('/pwa-icon-192.png'),
@@ -56,11 +81,11 @@ Route::get('/app.webmanifest', function () {
     }
 
     return response()->json([
-        'id' => url('/client'),
-        'name' => $appName,
-        'short_name' => str($appName)->limit(12, '')->toString(),
-        'description' => 'Delivery operations, rider GPS tracking, and client delivery updates.',
-        'start_url' => url('/client'),
+        'id' => $currentPortal['url'],
+        'name' => $manifestName,
+        'short_name' => $currentPortal['short_name'],
+        'description' => $currentPortal['description'],
+        'start_url' => $currentPortal['url'],
         'scope' => url('/') . '/',
         'display' => 'standalone',
         'background_color' => '#eef4f4',

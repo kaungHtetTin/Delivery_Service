@@ -7,6 +7,8 @@ use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
+    use RefreshDatabase;
+
     /**
      * A basic test example.
      *
@@ -30,5 +32,17 @@ class ExampleTest extends TestCase
             ->assertHeader('Content-Type', 'application/javascript; charset=UTF-8')
             ->assertSee('const firebaseConfig = {};', false)
             ->assertSee('self.addEventListener("notificationclick"', false);
+    }
+
+    public function test_rider_manifest_installs_the_rider_portal()
+    {
+        $response = $this->get('/app.webmanifest?portal=rider');
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('id', url('/rider'))
+            ->assertJsonPath('name', 'FlowDrop Delivery Rider')
+            ->assertJsonPath('short_name', 'Rider')
+            ->assertJsonPath('start_url', url('/rider'));
     }
 }

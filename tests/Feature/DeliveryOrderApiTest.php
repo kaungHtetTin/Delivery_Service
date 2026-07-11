@@ -1292,6 +1292,31 @@ class DeliveryOrderApiTest extends TestCase
         ]);
     }
 
+    public function test_office_status_edit_notifies_the_client()
+    {
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+        $client = $this->createUser([
+            'email' => 'office-status-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $order = DeliveryOrder::create($this->validOrderPayload() + [
+            'client_user_id' => $client->id,
+            'status' => 'pending',
+        ]);
+
+        $this->patchJson("/api/delivery-orders/{$order->id}", [
+            'status' => 'approved',
+        ])->assertOk()->assertJsonPath('status', 'approved');
+
+        $notification = $client->notifications()->first();
+
+        $this->assertNotNull($notification);
+        $this->assertSame('status_updated', $notification->data['kind']);
+        $this->assertSame('Delivery status updated', $notification->data['title']);
+        $this->assertSame('approved', $notification->data['status']);
+        $this->assertSame($order->id, $notification->data['order_id']);
+    }
+
     public function test_office_can_save_payment_cod_on_order_without_affecting_rider_cash_held()
     {
         $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
