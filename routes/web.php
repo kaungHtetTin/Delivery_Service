@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
 use App\Http\Controllers\MapTileController;
 use App\Models\SystemSetting;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,6 +18,22 @@ use App\Models\SystemSetting;
 */
 
 Route::get('/', fn () => redirect()->route('client'));
+Route::get('/storage/{path}', function (string $path) {
+    if (str_contains($path, '..') || str_starts_with($path, '/') || str_starts_with($path, '\\')) {
+        abort(404);
+    }
+
+    $disk = Storage::disk('public');
+
+    if (! $disk->exists($path)) {
+        abort(404);
+    }
+
+    return response($disk->get($path), 200, [
+        'Cache-Control' => 'public, max-age=604800',
+        'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+    ]);
+})->where('path', '.*')->name('storage.public');
 Route::get('/map-tiles/{z}/{x}/{y}', [MapTileController::class, 'show'])
     ->whereNumber(['z', 'x', 'y'])
     ->name('map-tiles.show');
