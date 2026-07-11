@@ -642,6 +642,23 @@ function healthCheckText(checks, keys) {
   return `Missing ${missing.map((key) => key.replaceAll("_", " ")).join(", ")}`;
 }
 
+function escapeMarkerText(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function riderMarkerHtml(rider) {
+  if (rider.profilePhotoUrl) {
+    return `<img alt="" src="${escapeMarkerText(rider.profilePhotoUrl)}" />`;
+  }
+
+  return `<span>${escapeMarkerText(rider.initials)}</span>`;
+}
+
 function userInitials(user) {
   return (user?.name || user?.email || "Office")
     .split(/[ @.]+/)
@@ -1137,7 +1154,7 @@ function RiderDetailMap({ mapTileUrl, rider }) {
       const marker = L.marker(point, {
         icon: L.divIcon({
           className: `rider-map-marker ${freshness} selected`,
-          html: `<span>${rider.initials}</span>`,
+          html: riderMarkerHtml(rider),
           iconSize: [34, 34],
           iconAnchor: [17, 17],
         }),
@@ -1873,7 +1890,7 @@ function AdminMap({ large = false, mapTileUrl, onSelectOrder, orders = [], rider
       const marker = L.marker([rider.currentLocation.latitude, rider.currentLocation.longitude], {
         icon: L.divIcon({
           className: `rider-map-marker ${freshness} ${selectedRider?.id === rider.id ? "selected" : ""}`,
-          html: `<span>${rider.initials}</span>`,
+          html: riderMarkerHtml(rider),
           iconSize: [34, 34],
           iconAnchor: [17, 17],
         }),

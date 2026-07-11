@@ -569,6 +569,7 @@ export function mapRider(rider) {
     initials: initials(rider.name),
     phone: rider.phone || rider.user?.phone || "",
     email: rider.email || rider.user?.email || "",
+    profilePhotoUrl: rider.user?.profile_photo_url || "",
     status: rider.status,
     activeOrders: rider.active_orders_count || 0,
     area: rider.current_area || "Area unavailable",
