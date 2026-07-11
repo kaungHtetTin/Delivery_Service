@@ -2307,6 +2307,120 @@ class DeliveryOrderApiTest extends TestCase
         $this->assertNotNull($client->notifications()->first()->read_at);
     }
 
+    public function test_authenticated_user_can_register_and_remove_web_push_subscription()
+    {
+        $user = $this->actingAsRole(User::ROLE_RIDER);
+        $token = str_repeat('push-token-', 45);
+
+        $this->postJson('/api/notifications/push-subscriptions', [
+            'token' => $token,
+            'platform' => 'web',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('push_subscriptions', [
+            'user_id' => $user->id,
+            'token' => $token,
+            'platform' => 'web',
+        ]);
+
+        $this->deleteJson('/api/notifications/push-subscriptions', [
+            'token' => $token,
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('push_subscriptions', [
+            'user_id' => $user->id,
+            'token' => $token,
+        ]);
+    }
+
+    public function test_office_receives_delivery_workflow_notifications()
+    {
+        $office = $this->createUser([
+            'email' => 'workflow-office@example.test',
+            'role' => User::ROLE_OFFICE_ADMIN,
+        ]);
+        $client = $this->createUser([
+            'email' => 'workflow-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+
+        Sanctum::actingAs($client);
+
+        $orderResponse = $this->postJson('/api/delivery-orders', array_merge($this->validOrderPayload(), [
+            'client_name' => $client->name,
+            'client_phone' => $client->phone,
+        ]))->assertCreated();
+
+        $this->assertSame(1, $office->notifications()->count());
+        $this->assertSame('New delivery request', $office->notifications()->latest()->first()->data['title']);
+
+        $this->patchJson("/api/delivery-orders/{$orderResponse->json('id')}", [
+            'client_note' => 'Gate code changed.',
+        ])->assertOk();
+
+        $this->assertSame(2, $office->notifications()->count());
+        $this->assertTrue($office->notifications()->get()->contains(
+            fn ($notification) => $notification->data['title'] === 'Client updated delivery request'
+                && $notification->data['order_code'] === $orderResponse->json('code')
+        ));
+
+        Sanctum::actingAs($office);
+
+        $this->getJson('/api/notifications')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+    }
+
+    public function test_office_can_broadcast_push_notifications_by_audience()
+    {
+        $client = $this->createUser([
+            'email' => 'broadcast-client@example.test',
+            'role' => User::ROLE_CLIENT,
+        ]);
+        $rider = $this->createUser([
+            'email' => 'broadcast-rider@example.test',
+            'role' => User::ROLE_RIDER,
+        ]);
+        $office = $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $this->postJson('/api/notifications/broadcast', [
+            'audience' => 'clients',
+            'title' => 'Client campaign',
+            'body' => 'Message for clients only.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('audience', 'clients')
+            ->assertJsonPath('target_count', 1);
+
+        $this->assertSame(1, $client->notifications()->count());
+        $this->assertSame(0, $rider->notifications()->count());
+        $this->assertSame('clients', $client->notifications()->first()->data['topic']);
+        $this->assertSame($office->id, $client->notifications()->first()->data['sent_by']);
+
+        $this->postJson('/api/notifications/broadcast', [
+            'audience' => 'clients_riders',
+            'title' => 'Everyone update',
+            'body' => 'Message for clients and riders.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('audience', 'clients_riders')
+            ->assertJsonPath('target_count', 2);
+
+        $this->assertSame(2, $client->notifications()->count());
+        $this->assertSame(1, $rider->notifications()->count());
+    }
+
+    public function test_client_cannot_broadcast_push_notifications()
+    {
+        $this->actingAsRole(User::ROLE_CLIENT);
+
+        $this->postJson('/api/notifications/broadcast', [
+            'audience' => 'clients_riders',
+            'title' => 'Blocked',
+            'body' => 'This should not send.',
+        ])->assertForbidden();
+    }
+
     public function test_completed_order_deletes_client_and_rider_notifications_for_that_order()
     {
         $client = $this->createUser([

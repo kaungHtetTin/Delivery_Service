@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Models\DeliveryOrder;
+use App\Notifications\Channels\FirebasePushChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 
@@ -21,7 +22,13 @@ class OrderActivityNotification extends Notification
 
     public function via($notifiable): array
     {
-        return ['database'];
+        $channels = ['database'];
+
+        if (config('services.firebase.push_enabled')) {
+            $channels[] = FirebasePushChannel::class;
+        }
+
+        return $channels;
     }
 
     public function toArray($notifiable): array
@@ -34,5 +41,23 @@ class OrderActivityNotification extends Notification
             'order_code' => $this->order->code,
             'status' => $this->order->status,
         ] + $this->meta;
+    }
+
+    public function toFirebase($notifiable): array
+    {
+        $link = match ($notifiable->role ?? null) {
+            'rider' => url('/rider'),
+            'office_admin', 'super_admin' => url('/office'),
+            default => url('/client'),
+        };
+
+        return [
+            'title' => $this->title,
+            'body' => $this->body,
+            'link' => $link,
+            'data' => $this->toArray($notifiable) + [
+                'portal' => ltrim(parse_url($link, PHP_URL_PATH) ?: '/client', '/'),
+            ],
+        ];
     }
 }

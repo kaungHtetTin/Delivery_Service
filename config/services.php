@@ -43,4 +43,22 @@ return [
         'location_retention_days' => env('RIDER_LOCATION_RETENTION_DAYS', 14),
     ],
 
+    'firebase' => [
+        'push_enabled' => env('FIREBASE_PUSH_ENABLED', false),
+        'project_id' => env('FIREBASE_PROJECT_ID', env('VITE_FIREBASE_PROJECT_ID')),
+        'client_email' => env('FIREBASE_CLIENT_EMAIL'),
+        'private_key' => env('FIREBASE_PRIVATE_KEY'),
+        'timeout' => env('FIREBASE_TIMEOUT', 5),
+        'public' => [
+            'apiKey' => env('VITE_FIREBASE_API_KEY'),
+            'authDomain' => env('VITE_FIREBASE_AUTH_DOMAIN'),
+            'projectId' => env('VITE_FIREBASE_PROJECT_ID'),
+            'storageBucket' => env('VITE_FIREBASE_STORAGE_BUCKET'),
+            'messagingSenderId' => env('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+            'appId' => env('VITE_FIREBASE_APP_ID'),
+            'measurementId' => env('VITE_FIREBASE_MEASUREMENT_ID'),
+        ],
+        'vapid_key' => env('VITE_FIREBASE_VAPID_KEY', env('FIREBASE_VAPID_KEY')),
+    ],
+
 ];

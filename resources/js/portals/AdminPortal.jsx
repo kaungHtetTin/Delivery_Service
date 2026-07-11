@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
-import { formatSettingValue, settingValueForInput } from "../api";
+import { formatSettingValue, sendPushBroadcast, settingValueForInput } from "../api";
 import { activeStatuses, currentMonthDateRange, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
-import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, SocketStatusBadge, StatusBadge } from "../components/shared";
+import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, NotificationList, SocketStatusBadge, StatusBadge } from "../components/shared";
 import { AdminReports } from "./admin/AdminReports";
 
 function todayDateInputValue() {
@@ -115,7 +115,11 @@ export function AdminPortal({
   financeCategories = [],
   financeSummary,
   financeTransactions = [],
+  disablePushAlerts,
+  enablePushAlerts,
+  markNotificationRead,
   mapTileUrl,
+  notifications = [],
   onRefreshFinance,
   removeCommissionRule,
   removeFinanceCategory,
@@ -125,6 +129,7 @@ export function AdminPortal({
   removeSetting,
   removeUser,
   reportData,
+  pushStatus,
   saveFinanceCategory,
   saveCommissionRule,
   saveFinanceTransaction,
@@ -228,6 +233,7 @@ export function AdminPortal({
   const totalCashHeld = riders.reduce((total, rider) => total + Number(rider.cashHeld || 0), 0);
   const currentOperationOrders = orders.filter((order) => !["completed", "failed", "cancelled"].includes(order.status));
   const incompleteOrderCount = currentOperationOrders.length;
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const gpsAlerts = reportData?.gps_alerts?.length
     ? reportData.gps_alerts
     : buildLocalGpsAlerts(riders, currentOperationOrders);
@@ -243,6 +249,8 @@ export function AdminPortal({
       items: [
         ["dashboard", "grid", "Dashboard"],
         ["orders", "box", "Orders"],
+        ["notifications", "bell", "Alerts", unreadCount],
+        ["broadcast", "bell", "Broadcast"],
         ["collections", "wallet", "Fee collections"],
         ["tracking", "mapPin", "Tracking map"],
       ],
@@ -281,9 +289,10 @@ export function AdminPortal({
           {navGroups.map((group) => (
             <div className="nav-group" key={group.label}>
               <p>{group.label}</p>
-              {group.items.map(([value, icon, label]) => (
+              {group.items.map(([value, icon, label, badgeCount = 0]) => (
                 <button className={activePage === value ? "active" : ""} key={value} onClick={() => setPage(value)} type="button">
                   <Icon name={icon} size={17} /> {label}
+                  {badgeCount > 0 && <small>{badgeCount > 99 ? "99+" : badgeCount}</small>}
                 </button>
               ))}
             </div>
@@ -307,9 +316,9 @@ export function AdminPortal({
             <button className="btn primary" onClick={() => setOrderEditor({})} type="button"><Icon name="plus" size={16} /> New delivery</button>
             <SocketStatusBadge status={socketStatus} />
             <DayNightToggle onChange={onThemeChange} theme={theme} />
-            <button aria-label={`${incompleteOrderCount} unfinished orders`} className="icon-btn notification-btn" onClick={() => setPage("orders")} type="button">
+            <button aria-label={`${unreadCount} unread alerts`} className="icon-btn notification-btn" onClick={() => setPage("notifications")} type="button">
               <Icon name="bell" />
-              {incompleteOrderCount > 0 && <span>{incompleteOrderCount > 99 ? "99+" : incompleteOrderCount}</span>}
+              {unreadCount > 0 && <span>{unreadCount > 99 ? "99+" : unreadCount}</span>}
             </button>
             <AdminProfileMenu onLogout={onLogout} onProfile={() => setPage("profile")} onSettings={() => setPage("settings")} onUsers={() => setPage("users")} user={user} />
           </div>
@@ -363,6 +372,17 @@ export function AdminPortal({
               </div>
             </section>
           )}
+          {activePage === "notifications" && (
+            <NotificationList
+              notifications={notifications}
+              onDisablePush={disablePushAlerts}
+              onEnablePush={enablePushAlerts}
+              onRead={markNotificationRead}
+              pushStatus={pushStatus}
+              title="Alerts"
+            />
+          )}
+          {activePage === "broadcast" && <PushBroadcastAdmin />}
           {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} onView={(rider) => { setSelectedRiderId(rider.id); setPage("rider-detail"); }} pagination={ridersPagination} riders={ridersPagination.items} />}
           {activePage === "rider-detail" && (
             <RiderDetailPage
@@ -404,7 +424,7 @@ export function AdminPortal({
           {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large mapTileUrl={mapTileUrl} onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
           {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
-          {!["dashboard", "orders", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
+          {!["dashboard", "orders", "notifications", "broadcast", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
         </div>
       </main>
       {selectedOrder && (
@@ -525,6 +545,80 @@ function OperationalAlerts({ alerts, onOpenTracking }) {
         );
       })}
     </div>
+  );
+}
+
+function PushBroadcastAdmin() {
+  const [form, setForm] = useState({
+    audience: "clients",
+    title: "",
+    body: "",
+  });
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const update = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setResult(null);
+    setError("");
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSending(true);
+    setResult(null);
+    setError("");
+
+    try {
+      const response = await sendPushBroadcast(form);
+      setResult(response);
+      setForm((current) => ({ ...current, title: "", body: "" }));
+    } catch (broadcastError) {
+      setError(
+        broadcastError?.payload?.message ||
+        Object.values(broadcastError?.payload?.errors || {})?.[0]?.[0] ||
+        broadcastError?.message ||
+        "Could not send broadcast.",
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <section className="panel glass push-broadcast-page">
+      <PanelHeading eyebrow="PUSH BROADCAST" title="Topic notifications" />
+      <form className="push-broadcast-form" onSubmit={submit}>
+        <label className="form-field">
+          <span>Audience</span>
+          <select onChange={(event) => update("audience", event.target.value)} value={form.audience}>
+            <option value="clients">All clients</option>
+            <option value="riders">All riders</option>
+            <option value="clients_riders">Clients and riders</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Title</span>
+          <input maxLength={120} onChange={(event) => update("title", event.target.value)} required value={form.title} />
+        </label>
+        <label className="form-field">
+          <span>Message</span>
+          <textarea maxLength={500} onChange={(event) => update("body", event.target.value)} required rows={5} value={form.body} />
+        </label>
+        {error && <p className="auth-error">{error}</p>}
+        {result && (
+          <p className="profile-success">
+            Sent to {result.target_count} account(s). {result.push_subscription_count} push-enabled device(s) matched.
+          </p>
+        )}
+        <div className="profile-actions">
+          <button className="btn primary" disabled={sending} type="submit">
+            <Icon name="bell" size={16} />
+            {sending ? "Sending..." : "Send broadcast"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 

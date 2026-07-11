@@ -1,7 +1,29 @@
 {
+  "_index.esm-C2oXT_b-.js": {
+    "file": "assets/index.esm-C2oXT_b-.js",
+    "name": "index.esm"
+  },
   "_leaflet-zdHhRoWp.js": {
     "file": "assets/leaflet-zdHhRoWp.js",
     "name": "leaflet"
+  },
+  "node_modules/firebase/app/dist/esm/index.esm.js": {
+    "file": "assets/index.esm-DzWMmzIb.js",
+    "name": "index.esm",
+    "src": "node_modules/firebase/app/dist/esm/index.esm.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index.esm-C2oXT_b-.js"
+    ]
+  },
+  "node_modules/firebase/messaging/dist/esm/index.esm.js": {
+    "file": "assets/index.esm-DRvvyRGr.js",
+    "name": "index.esm",
+    "src": "node_modules/firebase/messaging/dist/esm/index.esm.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index.esm-C2oXT_b-.js"
+    ]
   },
   "node_modules/leaflet/dist/images/layers-2x.png": {
     "file": "assets/layers-2x-Bpkbi35X.png",
@@ -16,15 +38,19 @@
     "src": "node_modules/leaflet/dist/images/marker-icon.png"
   },
   "resources/js/main.jsx": {
-    "file": "assets/main-C3kTElW_.js",
+    "file": "assets/main-CurZMqoM.js",
     "name": "main",
     "src": "resources/js/main.jsx",
     "isEntry": true,
     "imports": [
       "_leaflet-zdHhRoWp.js"
     ],
+    "dynamicImports": [
+      "node_modules/firebase/app/dist/esm/index.esm.js",
+      "node_modules/firebase/messaging/dist/esm/index.esm.js"
+    ],
     "css": [
-      "assets/main-DsWtcKsL.css"
+      "assets/main-mMU7DQiF.css"
     ],
     "assets": [
       "assets/layers-BWBAp2CZ.png",

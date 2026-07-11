@@ -73,6 +73,7 @@ import { Icon } from "./icons";
 import { ClientPortal } from "./portals/ClientPortal";
 import { RiderPortal } from "./portals/RiderPortal";
 import { AdminPortal } from "./portals/AdminPortal";
+import { disablePushNotifications, enablePushNotifications, getBrowserPushPermissionStatus, syncPushNotifications } from "./pushNotifications";
 import { createRealtimeConnection } from "./realtime";
 import { applyPublicSettings, currentMonthDateRange, useStoredState } from "./utils";
 
@@ -100,6 +101,37 @@ const errorMessage = (error) =>
   error?.message ||
   "Something went wrong.";
 
+function showForegroundPushNotification(payload, appBaseUrl = "") {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+    return;
+  }
+
+  const notification = payload?.notification || {};
+  const data = payload?.data || {};
+  const title = notification.title || data.title || "Delivery update";
+  const body = notification.body || data.body || "";
+  const link = data.link || window.location.href;
+  const icon = new URL("pwa-icon-192.png", `${(appBaseUrl || window.location.origin).replace(/\/$/, "")}/`).toString();
+
+  try {
+    const browserNotification = new Notification(title, {
+      body,
+      icon,
+      data: { link },
+    });
+
+    browserNotification.onclick = () => {
+      window.focus();
+      if (link) {
+        window.location.href = link;
+      }
+      browserNotification.close();
+    };
+  } catch {
+    // Foreground browser notifications are a best-effort enhancement.
+  }
+}
+
 export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "client" }) {
   const portal = portals.has(initialPortal) ? initialPortal : "client";
   const [auth, setAuth] = useStoredState("flowdrop.auth", null);
@@ -121,6 +153,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   const [booting, setBooting] = useState(Boolean(auth?.token));
   const [error, setError] = useState("");
   const [socketStatus, setSocketStatus] = useState("disconnected");
+  const [pushStatus, setPushStatus] = useState({ state: "default", message: "Push alerts are off on this device." });
   const [theme, setTheme] = useState("light");
   const [brand, setBrand] = useStoredState("flowdrop.brand", "#087f74");
   const [appName, setAppName] = useState("FlowDrop Delivery");
@@ -156,6 +189,9 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     [realtimeOrderIds],
   );
   const realtimeRiders = portal === "admin" || portal === "client" ? emptyRealtimeRecords : riders;
+  const pushStorageKey = auth?.user?.id
+    ? `flowdrop.firebase.messaging_token.user.${auth.user.id}`
+    : "flowdrop.firebase.messaging_token.guest";
 
   const clearAuth = () => {
     setAuth(null);
@@ -173,6 +209,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     setNotifications([]);
     setReportData(null);
     setSocketStatus("disconnected");
+    setPushStatus({ state: "default", message: "Push alerts are off on this device." });
   };
 
   useEffect(() => {
@@ -284,9 +321,104 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     }
   }, [hasPortalAccess, portal, publicSettingsHandlers]);
 
+  const handleForegroundPush = useCallback((payload) => {
+    showForegroundPushNotification(payload, appBaseUrl);
+    loadData();
+  }, [appBaseUrl, loadData]);
+
+  const enablePushAlerts = useCallback(async () => {
+    setPushStatus({ state: "working", message: "Enabling push alerts..." });
+
+    try {
+      const status = await enablePushNotifications({
+        appBaseUrl,
+        onForegroundMessage: handleForegroundPush,
+        storageKey: pushStorageKey,
+      });
+      setPushStatus(status);
+      return status;
+    } catch (pushError) {
+      console.warn("[firebase] push_enable_failed", { message: pushError?.message });
+      const status = { state: "error", message: "Push alerts could not be enabled." };
+      setPushStatus(status);
+      return status;
+    }
+  }, [appBaseUrl, handleForegroundPush, pushStorageKey]);
+
+  const disablePushAlerts = useCallback(async () => {
+    setPushStatus({ state: "working", message: "Disabling push alerts..." });
+
+    try {
+      const status = await disablePushNotifications({ storageKey: pushStorageKey });
+      const nextStatus = status || getBrowserPushPermissionStatus({ storageKey: pushStorageKey });
+      setPushStatus(nextStatus);
+      return nextStatus;
+    } catch (pushError) {
+      console.warn("[firebase] push_disable_failed", { message: pushError?.message });
+      const status = { state: "error", message: "Push alerts could not be disabled." };
+      setPushStatus(status);
+      return status;
+    }
+  }, [pushStorageKey]);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!hasPortalAccess) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setPushStatus(getBrowserPushPermissionStatus({ storageKey: pushStorageKey }));
+
+    syncPushNotifications({
+      appBaseUrl,
+      onForegroundMessage: handleForegroundPush,
+      storageKey: pushStorageKey,
+    })
+      .then((status) => {
+        if (!cancelled && status.state !== "idle") {
+          setPushStatus(status);
+        }
+      })
+      .catch((pushError) => {
+        console.warn("[firebase] push_sync_failed", { message: pushError?.message });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appBaseUrl, handleForegroundPush, hasPortalAccess, portal, pushStorageKey]);
+
+  useEffect(() => {
+    if (!hasPortalAccess || typeof navigator === "undefined" || !navigator.permissions?.query) {
+      return undefined;
+    }
+
+    let permissionStatus;
+    let cancelled = false;
+    const refreshPushStatus = () => setPushStatus(getBrowserPushPermissionStatus({ storageKey: pushStorageKey }));
+
+    navigator.permissions.query({ name: "notifications" })
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
+
+        permissionStatus = status;
+        permissionStatus.onchange = refreshPushStatus;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      if (permissionStatus) {
+        permissionStatus.onchange = null;
+      }
+    };
+  }, [hasPortalAccess, portal, pushStorageKey]);
 
   useEffect(() => {
     if (!hasPortalAccess) {
@@ -857,15 +989,18 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           <ClientPortal
             addresses={clientAddresses}
             appName={appName}
+            disablePushAlerts={disablePushAlerts}
             appIconUrl={appIconUrl}
             contactEmail={contactEmail}
             contactPhone={contactPhone}
+            enablePushAlerts={enablePushAlerts}
             markNotificationRead={markNotificationRead}
             mapTileUrl={mapTileUrl}
             notifications={notifications}
             onLogout={handleLogout}
             onThemeChange={setTheme}
             orders={orders}
+            pushStatus={pushStatus}
             removeOrder={removeOrder}
             removeAddress={removeClientAddress}
             removeShop={removeClientShop}
@@ -882,7 +1017,31 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
             user={auth.user}
           />
       )}
-      {portal === "rider" && <RiderPortal appIconUrl={appIconUrl} appName={appName} mapTileUrl={mapTileUrl} markNotificationRead={markNotificationRead} notifications={notifications} onGpsEvent={reportRiderGpsEvent} onLocation={reportRiderLocation} onLogout={handleLogout} onStartActive={startRiderDuty} onStopActive={stopRiderDuty} onThemeChange={setTheme} orders={orders} progressOrder={progressOrder} riders={riders} saveProfile={saveCurrentUserProfile} socketStatus={socketStatus} theme={theme} user={auth.user} />}
+      {portal === "rider" && (
+        <RiderPortal
+          appIconUrl={appIconUrl}
+          appName={appName}
+          disablePushAlerts={disablePushAlerts}
+          enablePushAlerts={enablePushAlerts}
+          mapTileUrl={mapTileUrl}
+          markNotificationRead={markNotificationRead}
+          notifications={notifications}
+          onGpsEvent={reportRiderGpsEvent}
+          onLocation={reportRiderLocation}
+          onLogout={handleLogout}
+          onStartActive={startRiderDuty}
+          onStopActive={stopRiderDuty}
+          onThemeChange={setTheme}
+          orders={orders}
+          progressOrder={progressOrder}
+          pushStatus={pushStatus}
+          riders={riders}
+          saveProfile={saveCurrentUserProfile}
+          socketStatus={socketStatus}
+          theme={theme}
+          user={auth.user}
+        />
+      )}
       {portal === "admin" && (
         <AdminPortal
           appName={appName}
@@ -894,7 +1053,11 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           financeCategories={financeCategories}
           financeSummary={financeSummary}
           financeTransactions={financeTransactions}
+          disablePushAlerts={disablePushAlerts}
+          enablePushAlerts={enablePushAlerts}
+          markNotificationRead={markNotificationRead}
           mapTileUrl={mapTileUrl}
+          notifications={notifications}
           onRefreshFinance={refreshFinanceData}
           onThemeChange={setTheme}
           orders={orders}
@@ -908,6 +1071,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           removeUser={removeUser}
           removeRider={removeRider}
           reportData={reportData}
+          pushStatus={pushStatus}
           riders={riders}
           saveCustomer={saveCustomer}
           saveCommissionRule={saveCommissionRule}

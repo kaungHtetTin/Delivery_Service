@@ -301,6 +301,34 @@ export async function markNotificationRead(notificationId) {
   return mapNotification(response);
 }
 
+export async function registerPushSubscription(token) {
+  return request("/notifications/push-subscriptions", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      platform: "web",
+    }),
+  });
+}
+
+export async function removePushSubscription(token) {
+  return request("/notifications/push-subscriptions", {
+    method: "DELETE",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function sendPushBroadcast(payload) {
+  return request("/notifications/broadcast", {
+    method: "POST",
+    body: JSON.stringify({
+      audience: payload.audience,
+      title: payload.title,
+      body: payload.body,
+    }),
+  });
+}
+
 export function mapOrder(order) {
   return {
     _apiId: order.id,

@@ -133,6 +133,12 @@ class DeliveryOrderController extends Controller
                 'Delivery request received',
                 "Your request {$order->code} is waiting for office review."
             );
+            $this->notifyOffice(
+                $order,
+                'order_created',
+                'New delivery request',
+                "{$order->code} is waiting for office review."
+            );
 
             return $order;
         });
@@ -214,6 +220,15 @@ class DeliveryOrderController extends Controller
 
             if (($validated['status'] ?? null) === 'completed') {
                 $this->deleteCompletedOrderNotifications($deliveryOrder);
+            }
+
+            if ($request->user()?->role === User::ROLE_CLIENT) {
+                $this->notifyOffice(
+                    $deliveryOrder,
+                    'order_updated',
+                    'Client updated delivery request',
+                    "{$deliveryOrder->code} was updated by the client."
+                );
             }
 
             $this->syncCompletedOrderFinance(
@@ -332,6 +347,13 @@ class DeliveryOrderController extends Controller
                 'New delivery assignment',
                 "Pickup is ready for {$deliveryOrder->code}."
             );
+            $this->notifyOffice(
+                $deliveryOrder,
+                'rider_assigned',
+                'Rider assigned',
+                "{$rider->name} was assigned to {$deliveryOrder->code}.",
+                ['rider_id' => $rider->id, 'rider_name' => $rider->name]
+            );
 
             if ($previousRider && $previousRider->isNot($rider)) {
                 $this->releaseRiderWhenIdle($previousRider, $deliveryOrder->id);
@@ -419,6 +441,13 @@ class DeliveryOrderController extends Controller
             }
 
             $this->notifyClient(
+                $deliveryOrder,
+                'status_updated',
+                'Delivery status updated',
+                "{$deliveryOrder->code} is now {$this->statusLabel($status)}.",
+                ['status' => $status]
+            );
+            $this->notifyOffice(
                 $deliveryOrder,
                 'status_updated',
                 'Delivery status updated',
@@ -563,6 +592,14 @@ class DeliveryOrderController extends Controller
         $rider->loadMissing('user');
 
         $rider->user?->notify(new OrderActivityNotification($order, $kind, $title, $body, $meta));
+    }
+
+    private function notifyOffice(DeliveryOrder $order, string $kind, string $title, string $body, array $meta = []): void
+    {
+        User::query()
+            ->whereIn('role', [User::ROLE_OFFICE_ADMIN, User::ROLE_SUPER_ADMIN])
+            ->get()
+            ->each(fn (User $user) => $user->notify(new OrderActivityNotification($order, $kind, $title, $body, $meta)));
     }
 
     private function syncCompletedOrderFinance(DeliveryOrder $order, string $previousStatus, float $previousDeliveryFee, ?int $actorId): void

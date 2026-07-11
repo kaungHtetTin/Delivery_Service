@@ -1,4 +1,4 @@
-const CACHE_NAME = "flowdrop-app-v2";
+const CACHE_NAME = "flowdrop-app-v3";
 const scopePath = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 const scoped = (path) => `${scopePath}${path.startsWith("/") ? path : `/${path}`}`;
 const APP_SHELL = [

@@ -2,8 +2,8 @@
   "name": "FlowDrop Delivery",
   "short_name": "FlowDrop",
   "description": "Delivery operations, rider GPS tracking, and client delivery updates.",
-  "id": "./rider",
-  "start_url": "./rider",
+  "id": "./client",
+  "start_url": "./client",
   "scope": "./",
   "display": "standalone",
   "background_color": "#eef4f4",
@@ -31,6 +31,13 @@
     }
   ],
   "shortcuts": [
+    {
+      "name": "Client",
+      "short_name": "Client",
+      "description": "Open client deliveries.",
+      "url": "client",
+      "icons": [{ "src": "pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
     {
       "name": "Rider GPS",
       "short_name": "GPS",

@@ -143,12 +143,55 @@ export function MobilePlaceholder({ icon, message = "Nothing to show here yet.",
   );
 }
 
-export function NotificationList({ notifications = [], onRead, title = "Notifications" }) {
+function pushStatusContent(pushStatus) {
+  if (!pushStatus) {
+    return null;
+  }
+
+  const labels = {
+    default: ["Push disabled", pushStatus.message],
+    disabled: ["Push disabled", pushStatus.message],
+    enabled: ["Push enabled", pushStatus.message || "Push alerts are enabled on this device."],
+    working: ["Push alerts", pushStatus.message],
+    unconfigured: ["Push not configured", pushStatus.message],
+    blocked: ["Push blocked", pushStatus.message || "Allow notifications from browser site settings to enable alerts."],
+    unsupported: ["Push unavailable", pushStatus.message],
+    error: ["Push unavailable", pushStatus.message],
+  };
+
+  return labels[pushStatus.state] || null;
+}
+
+export function NotificationList({ notifications = [], onDisablePush, onEnablePush, onRead, pushStatus, title = "Notifications" }) {
+  const pushContent = pushStatusContent(pushStatus);
+  const canEnablePush = ["default", "disabled", "error"].includes(pushStatus?.state);
+  const canDisablePush = pushStatus?.state === "enabled";
+  const pushPanel = pushContent && (
+    <div className="push-alert-panel glass">
+      <span><Icon name="bell" size={17} /></span>
+      <div>
+        <strong>{pushContent[0]}</strong>
+        {pushContent[1] && <small>{pushContent[1]}</small>}
+      </div>
+      {canEnablePush && (
+        <button className="btn secondary" onClick={onEnablePush} type="button">
+          Enable
+        </button>
+      )}
+      {canDisablePush && (
+        <button className="btn secondary" onClick={onDisablePush} type="button">
+          Disable
+        </button>
+      )}
+    </div>
+  );
+
   if (!notifications.length) {
     return (
       <section className="page-section">
         <p className="eyebrow">ALERTS</p>
         <h1>{title}</h1>
+        {pushPanel}
         <div className="placeholder compact-placeholder glass">
           <span><Icon name="bell" size={23} /></span>
           <h2>No alerts yet</h2>
@@ -162,6 +205,7 @@ export function NotificationList({ notifications = [], onRead, title = "Notifica
     <section className="page-section">
       <p className="eyebrow">ALERTS</p>
       <h1>{title}</h1>
+      {pushPanel}
       <div className="compact-list glass">
         {notifications.map((notification) => (
           <button

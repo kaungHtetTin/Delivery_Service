@@ -46,6 +46,8 @@ Route::middleware('auth:sanctum')->post('user/profile', [UserProfileController::
 Route::middleware('auth:sanctum')->post('auth/logout', [AuthController::class, 'logout']);
 Route::middleware('auth:sanctum')->get('notifications', [NotificationController::class, 'index']);
 Route::middleware('auth:sanctum')->patch('notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
+Route::middleware('auth:sanctum')->post('notifications/push-subscriptions', [NotificationController::class, 'storePushSubscription']);
+Route::middleware('auth:sanctum')->delete('notifications/push-subscriptions', [NotificationController::class, 'destroyPushSubscription']);
 Route::middleware('auth:sanctum')->get('realtime/token', [RealtimeTokenController::class, 'show']);
 
 Route::middleware(['auth:sanctum', 'role:client'])->group(function () {
@@ -77,6 +79,7 @@ Route::middleware(['auth:sanctum', 'role:client,office_admin,super_admin'])->gro
 });
 
 Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(function () {
+    Route::post('notifications/broadcast', [NotificationController::class, 'broadcast']);
     Route::post('delivery-orders/{deliveryOrder}/assign', [DeliveryOrderController::class, 'assign']);
     Route::get('finance/transactions/summary', [FinanceTransactionController::class, 'summary']);
     Route::apiResource('finance/categories', FinanceCategoryController::class)

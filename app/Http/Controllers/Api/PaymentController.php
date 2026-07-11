@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AdminLog;
 use App\Models\Payment;
+use App\Models\User;
 use App\Notifications\OrderActivityNotification;
 use App\Services\RealtimeSocketPublisher;
 use Illuminate\Http\JsonResponse;
@@ -155,6 +156,15 @@ class PaymentController extends Controller
             'status' => 'pending_approval',
         ]);
         $payment->deliveryOrder()->update(['payment_status' => 'pending_approval']);
+        $payment->load('deliveryOrder');
+
+        $this->notifyOffice(
+            $payment,
+            'payment_uploaded',
+            'Payment screenshot uploaded',
+            "Payment for {$payment->deliveryOrder->code} is waiting for review.",
+            ['payment_status' => 'pending_approval']
+        );
 
         $freshPayment = $payment->fresh()->load('deliveryOrder.rider');
         app(RealtimeSocketPublisher::class)->paymentUpdated($freshPayment);
@@ -214,5 +224,21 @@ class PaymentController extends Controller
         app(RealtimeSocketPublisher::class)->paymentUpdated($freshPayment);
 
         return response()->json($freshPayment);
+    }
+
+    private function notifyOffice(Payment $payment, string $kind, string $title, string $body, array $meta = []): void
+    {
+        $payment->loadMissing('deliveryOrder');
+
+        User::query()
+            ->whereIn('role', [User::ROLE_OFFICE_ADMIN, User::ROLE_SUPER_ADMIN])
+            ->get()
+            ->each(fn (User $user) => $user->notify(new OrderActivityNotification(
+                $payment->deliveryOrder,
+                $kind,
+                $title,
+                $body,
+                $meta
+            )));
     }
 }

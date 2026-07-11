@@ -50,7 +50,7 @@ function distanceLabel(distance) {
   return distance < 1000 ? `${Math.round(distance)}m away` : `${(distance / 1000).toFixed(1)}km away`;
 }
 
-export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, removeAddress, removeOrder, removeShop, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, setDefaultShop, shops = [], socketStatus = "disconnected", submitOrder, theme, user }) {
+export function ClientPortal({ addresses = [], appIconUrl = "", appName, contactEmail = "", contactPhone = "", disablePushAlerts, enablePushAlerts, mapTileUrl, markNotificationRead, notifications = [], onLogout, onThemeChange, orders, pushStatus, removeAddress, removeOrder, removeShop, saveAddress, saveOrder, saveProfile, saveShop, setDefaultAddress, setDefaultShop, shops = [], socketStatus = "disconnected", submitOrder, theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.client.page", "home");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.client.selectedOrder", null);
   const activeOrder = orders.find((order) => activeStatuses.has(order.status));
@@ -120,7 +120,7 @@ export function ClientPortal({ addresses = [], appIconUrl = "", appName, contact
             order={selectedOrder || activeOrder || orders[0]}
           />
         )}
-        {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
+        {page === "notifications" && <NotificationList notifications={notifications} onDisablePush={disablePushAlerts} onEnablePush={enablePushAlerts} onRead={markNotificationRead} pushStatus={pushStatus} title="Notifications" />}
         {page === "account" && (
           <ClientAccount
             addresses={addresses}

@@ -72,4 +72,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(ClientAddress::class);
     }
+
+    public function pushSubscriptions(): HasMany
+    {
+        return $this->hasMany(PushSubscription::class);
+    }
 }

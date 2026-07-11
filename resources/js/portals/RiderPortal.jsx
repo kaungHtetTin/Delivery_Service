@@ -67,7 +67,7 @@ function shouldDropQueuedLocation(error) {
   return discardableFields.some((field) => validationErrors[field]);
 }
 
-export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
+export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enablePushAlerts, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onStartActive, onStopActive, onThemeChange, orders, progressOrder, pushStatus, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
@@ -76,6 +76,7 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
   const historyOrders = riderOrders.filter((order) => historyStatuses.has(order.status));
   const selectedOrder = riderOrders.find((order) => order.id === selectedId);
   const incompleteOrderCount = activeOrders.length;
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const gpsTracking = useRiderGpsTracking({
     activeOrders,
     onGpsEvent,
@@ -88,7 +89,7 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
   if (!rider) {
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={incompleteOrderCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
         <main className="mobile-content">
           <MobilePlaceholder icon="bike" title="No rider profile" />
         </main>
@@ -101,7 +102,7 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
 
     return (
       <div className="mobile-app rider-app">
-        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={incompleteOrderCount} />
+        <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
         <main className="mobile-content">
           <RiderJobDetail
             gpsTracking={gpsTracking}
@@ -120,21 +121,21 @@ export function RiderPortal({ appIconUrl = "", appName, mapTileUrl, markNotifica
   }
   return (
     <div className="mobile-app rider-app">
-      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={incompleteOrderCount} />
+      <MobileTopbar appIconUrl={appIconUrl} appName={appName} onNotifications={() => setPage("notifications")} onThemeChange={onThemeChange} socketStatus={socketStatus} theme={theme} unreadCount={unreadCount} />
       <main className="mobile-content">
         {page === "jobs" && <RiderJobs gpsTracking={gpsTracking} onOpen={setSelectedId} orders={activeOrders} rider={rider} />}
         {page === "history" && <RiderHistory onOpen={setSelectedId} orders={historyOrders} />}
         {page === "gps" && <GpsStatus activeOrders={activeOrders} gpsTracking={gpsTracking} mapTileUrl={mapTileUrl} rider={rider} />}
-        {page === "notifications" && <NotificationList notifications={notifications} onRead={markNotificationRead} title="Notifications" />}
+        {page === "notifications" && <NotificationList notifications={notifications} onDisablePush={disablePushAlerts} onEnablePush={enablePushAlerts} onRead={markNotificationRead} pushStatus={pushStatus} title="Notifications" />}
         {page === "account" && <RiderAccount onLogout={onLogout} rider={rider} saveProfile={saveProfile} user={user} />}
       </main>
       <MobileNav
         active={page}
         items={[
-          ["jobs", "box", "Jobs"],
+          ["jobs", "box", "Jobs", false, incompleteOrderCount],
           ["history", "clock", "History"],
           ["gps", "location", "GPS"],
-          ["notifications", "bell", "Alerts", false, incompleteOrderCount],
+          ["notifications", "bell", "Alerts", false, unreadCount],
           ["account", "user", "Account"],
         ]}
         onNavigate={setPage}
