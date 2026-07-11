@@ -318,27 +318,6 @@ export async function removePushSubscription(token) {
   });
 }
 
-export async function sendPushBroadcast(payload) {
-  return request("/notifications/broadcast", {
-    method: "POST",
-    body: JSON.stringify({
-      audience: payload.audience,
-      title: payload.title,
-      body: payload.body,
-    }),
-  });
-}
-
-export async function fetchPushLogs({ limit = 100 } = {}) {
-  const response = await request(`/notifications/push-logs?limit=${encodeURIComponent(limit)}`);
-
-  return {
-    summary: response.summary || {},
-    entries: response.data || [],
-    devices: response.devices || [],
-  };
-}
-
 export function mapOrder(order) {
   return {
     _apiId: order.id,
@@ -1016,6 +995,10 @@ export async function createDeliveryOrder(order) {
 
 export async function fetchReportSummary() {
   return request("/reports/summary");
+}
+
+export async function fetchSystemHealth() {
+  return request("/system/health");
 }
 
 export async function fetchPayments() {

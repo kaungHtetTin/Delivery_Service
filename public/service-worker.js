@@ -1,4 +1,5 @@
 const CACHE_NAME = "flowdrop-app-v4";
+const GPS_STATUS_NOTIFICATION_TAG = "flowdrop-rider-gps-status";
 const scopeUrl = new URL(self.registration.scope);
 const scopePath = scopeUrl.pathname.replace(/\/$/, "");
 const scoped = (path) => `${scopePath}${path.startsWith("/") ? path : `/${path}`}`;
@@ -29,6 +30,33 @@ async function cacheIfOk(request, response) {
   }
 }
 
+async function closeNotificationsByTag(tag) {
+  if (!tag || !self.registration.getNotifications) {
+    return;
+  }
+
+  const notifications = await self.registration.getNotifications({ tag });
+  notifications.forEach((notification) => notification.close());
+}
+
+async function focusOrOpenWindow(link) {
+  const targetUrl = new URL(link || scoped("/rider"), self.location.origin).toString();
+  const clientList = await clients.matchAll({ type: "window", includeUncontrolled: true });
+  const existingClient = clientList.find((client) => {
+    try {
+      return new URL(client.url).pathname === new URL(targetUrl).pathname;
+    } catch {
+      return client.url === targetUrl;
+    }
+  });
+
+  if (existingClient) {
+    return existingClient.focus();
+  }
+
+  return clients.openWindow(targetUrl);
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -47,6 +75,47 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("message", (event) => {
+  const message = event.data || {};
+  const payload = message.payload || {};
+
+  if (message.type === "FLOWDROP_RIDER_GPS_STATUS_CLOSE") {
+    event.waitUntil(closeNotificationsByTag(payload.tag || GPS_STATUS_NOTIFICATION_TAG));
+    return;
+  }
+
+  if (message.type !== "FLOWDROP_RIDER_GPS_STATUS") {
+    return;
+  }
+
+  event.waitUntil((async () => {
+    const tag = payload.tag || GPS_STATUS_NOTIFICATION_TAG;
+
+    await closeNotificationsByTag(tag);
+    await self.registration.showNotification(payload.title || "GPS tracking ON", {
+      body: payload.body || "Sending latest rider location to server.",
+      badge: payload.icon || scoped("/pwa-icon-192.png"),
+      data: {
+        link: payload.link || scoped("/rider"),
+        type: "rider_gps_status",
+      },
+      icon: payload.icon || scoped("/pwa-icon-192.png"),
+      renotify: false,
+      requireInteraction: true,
+      silent: true,
+      tag,
+      timestamp: Date.now(),
+    });
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  const link = event.notification?.data?.link || scoped("/rider");
+
+  event.notification.close();
+  event.waitUntil(focusOrOpenWindow(link));
 });
 
 self.addEventListener("fetch", (event) => {

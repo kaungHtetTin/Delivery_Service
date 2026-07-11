@@ -6,6 +6,7 @@ import { deliveryFeeCashDue, formatDeliveryFeeLabel, money, useStoredState } fro
 import { nextRiderActions } from "../data";
 import { AddressBlock, MobileNav, MobilePlaceholder, MobileTopbar, NotificationList, StatusBadge } from "../components/shared";
 import { bumpQueuedLocationRetry, countQueuedRiderLocations, enqueueRiderLocation, getQueuedRiderLocations, removeQueuedLocation } from "../offlineLocationQueue";
+import { closeRiderGpsStatusNotification, ensureGpsNotificationPermission, isInstalledPwa, showRiderGpsStatusNotification } from "../pwaGpsStatusNotification";
 
 const historyStatuses = new Set(["completed", "failed", "cancelled"]);
 const dutyActiveStatuses = new Set(["online", "available", "busy"]);
@@ -67,7 +68,7 @@ function shouldDropQueuedLocation(error) {
   return discardableFields.some((field) => validationErrors[field]);
 }
 
-export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enablePushAlerts, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onRefresh, onStartActive, onStopActive, onThemeChange, orders, progressOrder, pushStatus, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
+export function RiderPortal({ appBaseUrl = "", appIconUrl = "", appName, disablePushAlerts, enablePushAlerts, mapTileUrl, markNotificationRead, notifications = [], onGpsEvent, onLocation, onLogout, onRefresh, onStartActive, onStopActive, onThemeChange, orders, progressOrder, pushStatus, riders, saveProfile, socketStatus = "disconnected", theme, user }) {
   const [page, setPage] = useStoredState("flowdrop.rider.page", "jobs");
   const [selectedId, setSelectedId] = useStoredState("flowdrop.rider.selectedOrder", null);
   const rider = riders[0];
@@ -79,6 +80,7 @@ export function RiderPortal({ appIconUrl = "", appName, disablePushAlerts, enabl
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
   const gpsTracking = useRiderGpsTracking({
     activeOrders,
+    appBaseUrl,
     onGpsEvent,
     onLocation,
     onStartActive,
@@ -290,7 +292,7 @@ function RiderProfileField({ inputMode, label, onChange, required = false, type 
   );
 }
 
-function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActive, onStopActive, rider }) {
+function useRiderGpsTracking({ activeOrders, appBaseUrl, onGpsEvent, onLocation, onStartActive, onStopActive, rider }) {
   const [permission, setPermission] = useState("unknown");
   const [trackingState, setTrackingState] = useState("idle");
   const [message, setMessage] = useState("");
@@ -307,14 +309,16 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
   const onGpsEventRef = useRef(onGpsEvent);
   const onLocationRef = useRef(onLocation);
   const lastGpsEventRef = useRef({});
+  const appBaseUrlRef = useRef(appBaseUrl);
   const dutyActive = Boolean(rider && dutyActiveStatuses.has(rider.status));
 
   useEffect(() => {
     riderRef.current = rider;
     ordersRef.current = activeOrders;
+    appBaseUrlRef.current = appBaseUrl;
     onGpsEventRef.current = onGpsEvent;
     onLocationRef.current = onLocation;
-  }, [activeOrders, onGpsEvent, onLocation, rider]);
+  }, [activeOrders, appBaseUrl, onGpsEvent, onLocation, rider]);
 
   useEffect(() => {
     if (rider?.currentLocation) {
@@ -376,6 +380,22 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
     await refreshQueuedCount();
     setTrackingState("warning");
     setMessage(queueMessage);
+    showRiderGpsStatusNotification({
+      appBaseUrl: appBaseUrlRef.current,
+      lastSentAt,
+      queuedCount: queuedCount + 1,
+      state: "warning",
+    }).catch(() => {});
+  };
+
+  const updateGpsStatusNotification = (details = {}) => {
+    showRiderGpsStatusNotification({
+      appBaseUrl: appBaseUrlRef.current,
+      accuracy: details.accuracy ?? lastPosition?.accuracy ?? null,
+      lastSentAt: details.lastSentAt || lastSentAt,
+      queuedCount: details.queuedCount ?? queuedCount,
+      state: details.state || trackingState,
+    }).catch(() => {});
   };
 
   const reportGpsEvent = async (event, details = {}) => {
@@ -462,6 +482,7 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
     setPermission(nextPermission);
     setTrackingState("warning");
     setMessage(nextMessage);
+    updateGpsStatusNotification({ state: "warning" });
     reportGpsEvent(eventByCode[error.code] || "position_unavailable", {
       message: nextMessage,
       permission: nextPermission,
@@ -508,6 +529,7 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
 
     setTrackingState("starting");
     setMessage("");
+    updateGpsStatusNotification({ state: "starting" });
     requestCurrentPosition();
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -626,6 +648,11 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
       setPermission("granted");
       setTrackingState(coords.accuracy && coords.accuracy > 100 ? "warning" : "active");
       setMessage(coords.accuracy && coords.accuracy > 100 ? "GPS accuracy is weak, but tracking is still running." : "");
+      updateGpsStatusNotification({
+        accuracy: coords.accuracy ?? null,
+        lastSentAt: recordedAt,
+        state: coords.accuracy && coords.accuracy > 100 ? "warning" : "active",
+      });
       if (coords.accuracy && coords.accuracy > 100) {
         reportGpsEvent("poor_accuracy", {
           message: "GPS accuracy is weak, but tracking is still running.",
@@ -657,12 +684,16 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
     if (!dutyActive) {
       stopWatcher();
       setTrackingState("idle");
+      closeRiderGpsStatusNotification().catch(() => {});
       return undefined;
     }
 
     startWatcher();
 
-    return stopWatcher;
+    return () => {
+      stopWatcher();
+      closeRiderGpsStatusNotification().catch(() => {});
+    };
   }, [dutyActive, permission, rider?._apiId]);
 
   useEffect(() => {
@@ -697,7 +728,9 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
     setMessage("");
 
     try {
+      await ensureGpsNotificationPermission();
       await onStartActive?.(rider);
+      updateGpsStatusNotification({ state: "starting" });
       await flushQueuedLocations();
     } catch (error) {
       setTrackingState("warning");
@@ -714,6 +747,7 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
     stopWatcher();
     setTrackingState("idle");
     setMessage("");
+    closeRiderGpsStatusNotification().catch(() => {});
 
     try {
       await onStopActive?.(rider);
@@ -735,6 +769,7 @@ function useRiderGpsTracking({ activeOrders, onGpsEvent, onLocation, onStartActi
     lastSentAt,
     message,
     permission,
+    pwaInstalled: isInstalledPwa(),
     queuedCount,
     refreshPosition: requestCurrentPosition,
     sending,
@@ -1189,6 +1224,7 @@ function GpsStatus({ activeOrders, gpsTracking, mapTileUrl, rider }) {
       <div className="compact-list glass">
         <div className="compact-row"><span className="row-icon"><Icon name="bike" size={16} /></span><span className="row-content"><strong>Rider status</strong><small>{rider.status.replaceAll("_", " ")}</small></span><StatusBadge status={rider.status} /></div>
         <div className="compact-row"><span className="row-icon"><Icon name="location" size={16} /></span><span className="row-content"><strong>Location permission</strong><small>{gpsTracking.permission === "unknown" ? "Waiting for browser permission" : gpsTracking.permission}</small></span><StatusBadge status={trackingStatus} /></div>
+        <div className="compact-row"><span className="row-icon"><Icon name="bell" size={16} /></span><span className="row-content"><strong>PWA GPS notification</strong><small>{gpsTracking.pwaInstalled ? "Available in this installed app" : "Open the installed rider app to show status notification"}</small></span><StatusBadge status={gpsTracking.pwaInstalled ? "available" : "pending"} /></div>
         <div className="compact-row"><span className="row-icon"><Icon name="clock" size={16} /></span><span className="row-content"><strong>Adaptive update frequency</strong><small>15s while moving, 45-60s when stationary</small></span>{gpsTracking.sending && <small>Sending...</small>}</div>
         <div className="compact-row"><span className="row-icon"><Icon name="upload" size={16} /></span><span className="row-content"><strong>Offline queue</strong><small>{queuedLabel}</small></span>{gpsTracking.flushing && <small>Syncing...</small>}</div>
         <div className="compact-row"><span className="row-icon"><Icon name="box" size={16} /></span><span className="row-content"><strong>Active assignments</strong><small>{activeOrders.length} current job{activeOrders.length === 1 ? "" : "s"}</small></span></div>

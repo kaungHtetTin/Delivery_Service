@@ -8,7 +8,7 @@ use Tests\TestCase;
 
 class FirebaseCloudMessagingTest extends TestCase
 {
-    public function test_web_push_payload_is_data_only_to_avoid_duplicate_browser_notifications(): void
+    public function test_web_push_payload_includes_visible_notification_for_safari(): void
     {
         config()->set('app.name', 'FlowDrop Test');
 
@@ -25,8 +25,10 @@ class FirebaseCloudMessagingTest extends TestCase
             ],
         ]);
 
-        $this->assertArrayNotHasKey('notification', $payload);
-        $this->assertArrayNotHasKey('notification', $payload['webpush']);
+        $this->assertSame('Rider assigned', $payload['notification']['title']);
+        $this->assertSame('A rider has been assigned.', $payload['notification']['body']);
+        $this->assertSame(url('/pwa-icon-192.png'), $payload['webpush']['notification']['icon']);
+        $this->assertFalse($payload['webpush']['notification']['renotify']);
         $this->assertSame('Rider assigned', $payload['data']['title']);
         $this->assertSame('A rider has been assigned.', $payload['data']['body']);
         $this->assertSame('42', $payload['data']['order_id']);

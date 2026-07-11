@@ -23,6 +23,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -1237,6 +1239,51 @@ class DeliveryOrderApiTest extends TestCase
             ->assertJsonCount(200, 'riders');
     }
 
+    public function test_office_can_view_system_health_readiness()
+    {
+        config()->set('services.socket_server.enabled', true);
+        config()->set('services.socket_server.url', 'http://socket.test');
+        config()->set('services.socket_server.key', 'test-key');
+        config()->set('services.socket_server.auth_secret', 'socket-secret');
+        config()->set('services.firebase.push_enabled', true);
+        config()->set('services.firebase.project_id', 'demo-project');
+        config()->set('services.firebase.client_email', 'firebase-admin@example.test');
+        config()->set('services.firebase.private_key', 'fake-private-key');
+        config()->set('services.firebase.vapid_key', 'vapid-key');
+        config()->set('services.firebase.public', [
+            'apiKey' => 'api-key',
+            'authDomain' => 'demo.firebaseapp.com',
+            'projectId' => 'demo-project',
+            'storageBucket' => 'demo.appspot.com',
+            'messagingSenderId' => 'sender-id',
+            'appId' => 'app-id',
+        ]);
+        Http::fake([
+            'socket.test/health' => Http::response([
+                'ok' => true,
+                'service' => 'flowdrop-socket-server',
+                'sockets' => 3,
+            ]),
+        ]);
+        $client = $this->createUser(['role' => User::ROLE_CLIENT]);
+        $client->pushSubscriptions()->create([
+            'token' => str_repeat('client-health-token-', 16),
+            'platform' => 'web',
+            'last_seen_at' => now(),
+        ]);
+        $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
+
+        $this->getJson('/api/system/health')
+            ->assertOk()
+            ->assertJsonPath('overall', 'ok')
+            ->assertJsonPath('socket.ready', true)
+            ->assertJsonPath('socket.live.ok', true)
+            ->assertJsonPath('firebase.ready', true)
+            ->assertJsonPath('firebase.subscriptions.total', 1)
+            ->assertJsonPath('firebase.subscriptions.by_role.client', 1)
+            ->assertJsonPath('firebase.web.service_worker.url', url('/firebase-messaging-sw.js'));
+    }
+
     public function test_office_can_view_admin_logs()
     {
         $this->actingAsRole(User::ROLE_OFFICE_ADMIN);
@@ -2387,6 +2434,27 @@ class DeliveryOrderApiTest extends TestCase
         } finally {
             File::delete($logFile);
         }
+    }
+
+    public function test_push_worker_can_record_trace_logs_without_authentication()
+    {
+        Log::shouldReceive('info')
+            ->once()
+            ->with('[firebase] push_worker_trace', \Mockery::on(function (array $context) {
+                return $context['event'] === 'push_event'
+                    && $context['details']['has_notification'] === true
+                    && $context['details']['title'] === 'New delivery assignment';
+            }));
+
+        $this->postJson('/api/notifications/push-worker-trace', [
+            'event' => 'push_event',
+            'details' => [
+                'has_notification' => true,
+                'title' => 'New delivery assignment',
+                'token' => 'ignored-secret-value',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('message', 'Push worker trace recorded.');
     }
 
     public function test_office_receives_delivery_workflow_notifications()

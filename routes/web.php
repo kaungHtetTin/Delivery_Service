@@ -126,11 +126,76 @@ Route::get('/firebase-messaging-sw.js', function () {
     $jsonConfig = json_encode((object) $config, JSON_UNESCAPED_SLASHES);
     $clientUrl = url('/client');
     $iconUrl = url('/pwa-icon-192.png');
+    $traceUrl = url('/api/notifications/push-worker-trace');
     $firebaseVersion = '12.16.0';
     $script = <<<JS
 const firebaseConfig = {$jsonConfig};
 const defaultClickUrl = "{$clientUrl}";
 const defaultIconUrl = "{$iconUrl}";
+const traceUrl = "{$traceUrl}";
+
+function traceFirebaseWorker(eventName, details = {}) {
+  try {
+    return fetch(traceUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ event: eventName, details }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (error) {
+    return Promise.resolve();
+  }
+}
+
+function payloadSummary(payload) {
+  const data = payload?.data || {};
+  return {
+    has_data: !!payload?.data,
+    has_notification: !!payload?.notification,
+    has_webpush: !!payload?.webpush,
+    has_fcm_options: !!payload?.fcmOptions,
+    payload_keys: payload ? Object.keys(payload).slice(0, 20) : [],
+    data_keys: Object.keys(data).slice(0, 20),
+    title: payload?.notification?.title || data.title || "",
+    message_id: payload?.messageId || payload?.data?.["google.c.a.c_id"] || "",
+    link: data.link || payload?.fcmOptions?.link || defaultClickUrl,
+  };
+}
+
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    let details = { has_data: !!event.data };
+
+    try {
+      if (event.data) {
+        details = payloadSummary(event.data.json());
+      }
+    } catch (error) {
+      details.error = error?.message || String(error);
+    }
+
+    await traceFirebaseWorker("push_event", details);
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const link = event.notification?.data?.link || defaultClickUrl;
+
+  event.waitUntil(
+    traceFirebaseWorker("notification_click", { title: event.notification?.title || "", link })
+      .then(() => clients.matchAll({ type: "window", includeUncontrolled: true }))
+      .then((clientList) => {
+      const existingClient = clientList.find((client) => client.url === link);
+
+      if (existingClient) {
+        return existingClient.focus();
+      }
+
+      return clients.openWindow(link);
+    })
+  );
+});
 
 try {
   if (firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.messagingSenderId && firebaseConfig.appId) {
@@ -142,10 +207,13 @@ try {
 
     messaging.onBackgroundMessage((payload) => {
       if (payload.notification) {
+        traceFirebaseWorker("background_message_notification_payload", payloadSummary(payload));
         return;
       }
 
       const data = payload.data || {};
+
+      traceFirebaseWorker("background_message_data_payload", payloadSummary(payload));
 
       self.registration.showNotification(data.title || "Delivery update", {
         body: data.body || "",
@@ -156,29 +224,16 @@ try {
         data: {
           link: data.link || defaultClickUrl,
         },
-      });
+      }).catch((error) => traceFirebaseWorker("show_notification_failed", {
+        error: error?.message || String(error),
+        title: data.title || "Delivery update",
+      }));
     });
   }
 } catch (error) {
   console.warn("[firebase-sw] setup_failed", error?.message || error);
+  traceFirebaseWorker("setup_failed", { error: error?.message || String(error) });
 }
-
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const link = event.notification?.data?.link || defaultClickUrl;
-
-  event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      const existingClient = clientList.find((client) => client.url === link);
-
-      if (existingClient) {
-        return existingClient.focus();
-      }
-
-      return clients.openWindow(link);
-    })
-  );
-});
 JS;
 
     return response($script, 200, [

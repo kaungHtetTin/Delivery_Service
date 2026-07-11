@@ -13,7 +13,7 @@ const realtimeEvents = [
   "notification:created",
 ];
 
-export function createRealtimeConnection({ auth, orders = [], riders = [], onRefresh, onStatusChange, socketToken = "" }) {
+export function createRealtimeConnection({ auth, orders = [], riders = [], onEvent, onRefresh, onStatusChange, socketToken = "" }) {
   const socketUrl = import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:3000";
   const enabled = import.meta.env.VITE_SOCKET_ENABLED !== "false";
   const socketAuth = buildSocketAuth(auth, orders, riders);
@@ -112,6 +112,7 @@ export function createRealtimeConnection({ auth, orders = [], riders = [], onRef
   realtimeEvents.forEach((eventName) => {
     socket.on(eventName, (payload) => {
       console.info("[realtime] event", { eventName, payload });
+      onEvent?.(eventName, payload);
       scheduleRefresh(eventName, payload);
     });
   });

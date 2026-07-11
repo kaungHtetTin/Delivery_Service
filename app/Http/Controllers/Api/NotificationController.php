@@ -84,6 +84,35 @@ class NotificationController extends Controller
         return response()->json(['message' => 'Push subscription removed.']);
     }
 
+    public function pushWorkerTrace(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'event' => ['required', 'string', 'max:80'],
+            'details' => ['nullable', 'array'],
+        ]);
+
+        Log::info('[firebase] push_worker_trace', [
+            'event' => $validated['event'],
+            'details' => collect($validated['details'] ?? [])
+                ->only([
+                    'has_data',
+                    'has_notification',
+                    'has_webpush',
+                    'has_fcm_options',
+                    'payload_keys',
+                    'data_keys',
+                    'title',
+                    'message_id',
+                    'error',
+                    'link',
+                ])
+                ->all(),
+            'user_agent' => str($request->userAgent() ?: '')->limit(160)->toString(),
+        ]);
+
+        return response()->json(['message' => 'Push worker trace recorded.']);
+    }
+
     public function broadcast(Request $request): JsonResponse
     {
         $validated = $request->validate([

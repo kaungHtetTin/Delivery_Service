@@ -97,6 +97,10 @@ class FirebaseCloudMessaging
 
         return [
             'token' => $token,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+            ],
             'data' => $data + [
                 'title' => $title,
                 'body' => $body,
@@ -106,6 +110,12 @@ class FirebaseCloudMessaging
             'webpush' => [
                 'fcm_options' => [
                     'link' => $link,
+                ],
+                'notification' => [
+                    'icon' => url('/pwa-icon-192.png'),
+                    'badge' => url('/pwa-icon-192.png'),
+                    'tag' => $data['notification_id'] ?? $data['order_id'] ?? null,
+                    'renotify' => false,
                 ],
             ],
         ];

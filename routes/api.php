@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RiderController;
 use App\Http\Controllers\Api\ShopController;
 use App\Http\Controllers\Api\ShippingAddressController;
+use App\Http\Controllers\Api\SystemHealthController;
 use App\Http\Controllers\Api\SystemSettingController;
 use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\UserProfileController;
@@ -37,6 +38,8 @@ use App\Http\Controllers\Api\UserProfileController;
 Route::post('auth/token', [AuthController::class, 'token']);
 Route::post('auth/register', [AuthController::class, 'register']);
 Route::get('settings/public', [SystemSettingController::class, 'publicIndex']);
+Route::post('notifications/push-worker-trace', [NotificationController::class, 'pushWorkerTrace'])
+    ->middleware('throttle:60,1');
 
 Route::middleware('auth:sanctum')->get('user', function (Request $request) {
     return $request->user();
@@ -105,6 +108,7 @@ Route::middleware(['auth:sanctum', 'role:office_admin,super_admin'])->group(func
     Route::apiResource('settings', SystemSettingController::class)->parameters(['settings' => 'systemSetting']);
     Route::apiResource('users', UserManagementController::class);
     Route::get('reports/summary', [ReportController::class, 'summary']);
+    Route::get('system/health', [SystemHealthController::class, 'show']);
     Route::get('admin-logs', [AdminLogController::class, 'index']);
     Route::post('riders', [RiderController::class, 'store']);
     Route::post('riders/{rider}/settlements', [RiderController::class, 'collectHeldFees']);

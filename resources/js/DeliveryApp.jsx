@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   assignDeliveryOrder,
   collectRiderHeldFees,
@@ -39,6 +39,7 @@ import {
   fetchReportSummary,
   fetchRiders,
   fetchSettings,
+  fetchSystemHealth,
   fetchPublicSettings,
   fetchShops,
   fetchUsers,
@@ -75,6 +76,7 @@ import { RiderPortal } from "./portals/RiderPortal";
 import { AdminPortal } from "./portals/AdminPortal";
 import { disablePushNotifications, enablePushNotifications, getBrowserPushPermissionStatus, syncPushNotifications } from "./pushNotifications";
 import { createRealtimeConnection } from "./realtime";
+import { playWorkflowAlert, unlockAlertAudio } from "./alertAudio";
 import { applyPublicSettings, currentMonthDateRange, useStoredState } from "./utils";
 
 const portals = new Set(["client", "rider", "admin"]);
@@ -100,6 +102,8 @@ const errorMessage = (error) =>
   Object.values(error?.payload?.errors || {})?.[0]?.[0] ||
   error?.message ||
   "Something went wrong.";
+
+const alertCooldownMs = 2500;
 
 function showForegroundPushNotification(payload, appBaseUrl = "") {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
@@ -152,6 +156,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   const [notifications, setNotifications] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [reportData, setReportData] = useState(null);
+  const [systemHealth, setSystemHealth] = useState(null);
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(Boolean(auth?.token));
   const [error, setError] = useState("");
@@ -164,6 +169,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   const [faviconUrl, setFaviconUrl] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  const lastAlertSoundRef = useRef({ key: "", playedAt: 0 });
   const themeStyle = useMemo(() => ({ "--color-primary": brand }), [brand]);
   const publicSettingsHandlers = useMemo(
     () => ({ setAppIconUrl, setAppName, setBrand, setContactEmail, setContactPhone, setFaviconUrl }),
@@ -196,6 +202,43 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     ? `flowdrop.firebase.messaging_token.user.${auth.user.id}`
     : "flowdrop.firebase.messaging_token.guest";
 
+  const playWorkflowSound = useCallback((kind, key = kind) => {
+    const now = Date.now();
+    const lastAlertSound = lastAlertSoundRef.current;
+
+    if (lastAlertSound.key === key && now - lastAlertSound.playedAt < alertCooldownMs) {
+      return;
+    }
+
+    lastAlertSoundRef.current = { key, playedAt: now };
+    playWorkflowAlert(kind).catch(() => {});
+  }, []);
+
+  const maybePlayPayloadSound = useCallback((payload = {}) => {
+    const data = payload.data || payload;
+    const orderKey = data.order_id || data.orderId || data.id || data.order_code || data.code || "";
+
+    if (portal === "rider" && data.kind === "new_assignment") {
+      playWorkflowSound("rider_assignment", `rider_assignment:${orderKey}`);
+      return;
+    }
+
+    if (portal === "client" && data.kind === "status_updated" && data.status === "delivered") {
+      playWorkflowSound("client_delivered", `client_delivered:${orderKey}`);
+    }
+  }, [playWorkflowSound, portal]);
+
+  const handleRealtimeEvent = useCallback((eventName, payload = {}) => {
+    if (portal === "rider" && eventName === "order:assigned") {
+      playWorkflowSound("rider_assignment", `rider_assignment:${payload.order_id || payload.id || payload.code || ""}`);
+      return;
+    }
+
+    if (portal === "client" && eventName === "order:status-updated" && payload.status === "delivered") {
+      playWorkflowSound("client_delivered", `client_delivered:${payload.order_id || payload.id || payload.code || ""}`);
+    }
+  }, [playWorkflowSound, portal]);
+
   const clearAuth = () => {
     setAuth(null);
     setOrders([]);
@@ -211,6 +254,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
     setFinanceSummary(null);
     setNotifications([]);
     setReportData(null);
+    setSystemHealth(null);
     setSocketStatus("disconnected");
     setPushStatus({ state: "default", message: "Push alerts are off on this device." });
   };
@@ -311,6 +355,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
         setSettings(loadedSettings);
         applyPublicSettings(loadedSettings, publicSettingsHandlers);
         setReportData(await fetchReportSummary());
+        setSystemHealth(await fetchSystemHealth());
         setCommissionRules(await fetchCommissionRules());
         setFinanceCategories(await fetchFinanceCategories());
         const financeDefaultFilters = currentMonthDateRange();
@@ -325,14 +370,16 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   }, [hasPortalAccess, portal, publicSettingsHandlers]);
 
   const handleForegroundPush = useCallback((payload) => {
+    maybePlayPayloadSound(payload);
     showForegroundPushNotification(payload, appBaseUrl);
     loadData();
-  }, [appBaseUrl, loadData]);
+  }, [appBaseUrl, loadData, maybePlayPayloadSound]);
 
   const enablePushAlerts = useCallback(async () => {
     setPushStatus({ state: "working", message: "Enabling push alerts..." });
 
     try {
+      await unlockAlertAudio();
       const status = await enablePushNotifications({
         appBaseUrl,
         onForegroundMessage: handleForegroundPush,
@@ -367,6 +414,24 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!hasPortalAccess) {
+      return undefined;
+    }
+
+    const unlock = () => {
+      unlockAlertAudio().catch(() => {});
+    };
+
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [hasPortalAccess]);
 
   useEffect(() => {
     if (!hasPortalAccess) {
@@ -442,6 +507,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           auth,
           orders: realtimeOrders,
           riders: realtimeRiders,
+          onEvent: handleRealtimeEvent,
           onRefresh: loadData,
           onStatusChange: setSocketStatus,
           socketToken: realtimeAuth.token,
@@ -459,6 +525,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           auth,
           orders: realtimeOrders,
           riders: realtimeRiders,
+          onEvent: handleRealtimeEvent,
           onRefresh: loadData,
           onStatusChange: setSocketStatus,
         });
@@ -468,7 +535,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
       cancelled = true;
       cleanup();
     };
-  }, [auth, hasPortalAccess, loadData, realtimeOrders, realtimeRiders]);
+  }, [auth, handleRealtimeEvent, hasPortalAccess, loadData, realtimeOrders, realtimeRiders]);
 
   const submitOrder = async (order) => {
     const submittedOrder = await createDeliveryOrder(order);
@@ -1023,6 +1090,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
       )}
       {portal === "rider" && (
         <RiderPortal
+          appBaseUrl={appBaseUrl}
           appIconUrl={appIconUrl}
           appName={appName}
           disablePushAlerts={disablePushAlerts}
@@ -1095,6 +1163,7 @@ export default function App({ appBaseUrl = "", apiBaseUrl, initialPortal = "clie
           selectedOrderId={selectedOrderId}
           setSelectedOrderId={setSelectedOrderId}
           socketStatus={socketStatus}
+          systemHealth={systemHealth}
           theme={theme}
           onLogout={handleLogout}
           user={auth.user}

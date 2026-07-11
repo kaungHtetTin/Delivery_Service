@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Icon } from "../icons";
-import { fetchPushLogs, formatSettingValue, sendPushBroadcast, settingValueForInput } from "../api";
+import { formatSettingValue, settingValueForInput } from "../api";
 import { activeStatuses, currentMonthDateRange, formatDeliveryFeeLabel, money, useStoredState } from "../utils";
 import { AddressBlock, CreatorSourceBadge, DayNightToggle, formatOrderCreator, Logo, NotificationList, SocketStatusBadge, StatusBadge } from "../components/shared";
 import { AdminReports } from "./admin/AdminReports";
@@ -143,6 +143,7 @@ export function AdminPortal({
   selectedOrderId,
   setSelectedOrderId,
   socketStatus = "disconnected",
+  systemHealth,
   settings = [],
   shops = [],
   onLogout,
@@ -251,8 +252,6 @@ export function AdminPortal({
         ["dashboard", "grid", "Dashboard"],
         ["orders", "box", "Orders"],
         ["notifications", "bell", "Alerts", unreadCount],
-        ["broadcast", "bell", "Broadcast"],
-        ["push-logs", "bell", "Push logs"],
         ["collections", "wallet", "Fee collections"],
         ["tracking", "mapPin", "Tracking map"],
       ],
@@ -358,6 +357,10 @@ export function AdminPortal({
                   <PanelHeading title="Attention needed" eyebrow="ALERTS" />
                   <OperationalAlerts alerts={gpsAlerts} onOpenTracking={() => setPage("tracking")} />
                 </div>
+                <div className="panel glass">
+                  <PanelHeading title="Server health" eyebrow="READINESS" />
+                  <ServerHealthPanel health={systemHealth} liveSocketStatus={socketStatus} onRefresh={onRefresh} />
+                </div>
               </section>
             </>
           )}
@@ -385,8 +388,6 @@ export function AdminPortal({
               title="Alerts"
             />
           )}
-          {activePage === "broadcast" && <PushBroadcastAdmin />}
-          {activePage === "push-logs" && <PushLogsAdmin />}
           {activePage === "riders" && <RidersAdmin filters={riderFilters} onDelete={removeRider} onEdit={(rider) => setRiderEditor(rider)} onFilterChange={setRiderFilters} onNew={() => setRiderEditor({})} onView={(rider) => { setSelectedRiderId(rider.id); setPage("rider-detail"); }} pagination={ridersPagination} riders={ridersPagination.items} />}
           {activePage === "rider-detail" && (
             <RiderDetailPage
@@ -428,7 +429,7 @@ export function AdminPortal({
           {activePage === "tracking" && <section className="panel full-map glass"><PanelHeading title="Live rider tracking" eyebrow="REAL-TIME MAP" /><AdminMap large mapTileUrl={mapTileUrl} onSelectOrder={setSelectedOrderId} orders={currentOperationOrders} riders={riders} /></section>}
           {activePage === "reports" && <AdminReports orders={orders} reportData={reportData} riders={riders} />}
           {activePage === "profile" && <AdminProfilePage onSave={saveProfile} user={user} />}
-          {!["dashboard", "orders", "notifications", "broadcast", "push-logs", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
+          {!["dashboard", "orders", "notifications", "riders", "rider-detail", "collections", "finance", "customers", "users", "settings", "tracking", "reports", "profile"].includes(activePage) && <AdminPlaceholder page={activePage} />}
         </div>
       </main>
       {selectedOrder && (
@@ -552,246 +553,93 @@ function OperationalAlerts({ alerts, onOpenTracking }) {
   );
 }
 
-function PushBroadcastAdmin() {
-  const [form, setForm] = useState({
-    audience: "clients",
-    title: "",
-    body: "",
-  });
-  const [sending, setSending] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-  const update = (key, value) => {
-    setForm((current) => ({ ...current, [key]: value }));
-    setResult(null);
-    setError("");
-  };
+function ServerHealthPanel({ health, liveSocketStatus, onRefresh }) {
+  if (!health) {
+    return (
+      <div className="server-health-panel">
+        <p className="muted table-empty">Health checks will appear after the dashboard refreshes.</p>
+        <button className="btn secondary" onClick={onRefresh} type="button"><Icon name="refresh" size={16} /> Refresh</button>
+      </div>
+    );
+  }
 
-  const submit = async (event) => {
-    event.preventDefault();
-    setSending(true);
-    setResult(null);
-    setError("");
-
-    try {
-      const response = await sendPushBroadcast(form);
-      setResult(response);
-      setForm((current) => ({ ...current, title: "", body: "" }));
-    } catch (broadcastError) {
-      setError(
-        broadcastError?.payload?.message ||
-        Object.values(broadcastError?.payload?.errors || {})?.[0]?.[0] ||
-        broadcastError?.message ||
-        "Could not send broadcast.",
-      );
-    } finally {
-      setSending(false);
-    }
-  };
+  const socket = health.socket || {};
+  const firebase = health.firebase || {};
+  const socketStatus = healthStatus(socket.status);
+  const firebaseStatus = healthStatus(firebase.status);
+  const firebaseAdmin = firebase.admin?.checks || {};
+  const firebaseWeb = firebase.web?.checks || {};
+  const roles = firebase.subscriptions?.by_role || {};
 
   return (
-    <section className="panel glass push-broadcast-page">
-      <PanelHeading eyebrow="PUSH BROADCAST" title="Topic notifications" />
-      <form className="push-broadcast-form" onSubmit={submit}>
-        <label className="form-field">
-          <span>Audience</span>
-          <select onChange={(event) => update("audience", event.target.value)} value={form.audience}>
-            <option value="clients">All clients</option>
-            <option value="riders">All riders</option>
-            <option value="clients_riders">Clients and riders</option>
-          </select>
-        </label>
-        <label className="form-field">
-          <span>Title</span>
-          <input maxLength={120} onChange={(event) => update("title", event.target.value)} required value={form.title} />
-        </label>
-        <label className="form-field">
-          <span>Message</span>
-          <textarea maxLength={500} onChange={(event) => update("body", event.target.value)} required rows={5} value={form.body} />
-        </label>
-        {error && <p className="auth-error">{error}</p>}
-        {result && (
-          <p className="profile-success">
-            Sent to {result.target_count} account(s). {result.push_subscription_count} push-enabled device(s) matched.
-          </p>
-        )}
-        <div className="profile-actions">
-          <button className="btn primary" disabled={sending} type="submit">
-            <Icon name="bell" size={16} />
-            {sending ? "Sending..." : "Send broadcast"}
-          </button>
-        </div>
-      </form>
-    </section>
+    <div className="server-health-panel">
+      <div className="health-overview">
+        <HealthSummaryCard icon="navigation" label="Socket server" note={socket.live?.message || socket.url || "No socket URL configured"} status={socketStatus} value={socket.ready ? "Ready" : socketStatus.label} />
+        <HealthSummaryCard icon="bell" label="Firebase push" note={`${firebase.subscriptions?.total || 0} saved device(s)`} status={firebaseStatus} value={firebase.ready ? "Ready" : firebaseStatus.label} />
+      </div>
+      <div className="health-detail-list">
+        <HealthCheckRow label="Live socket connection" ok={liveSocketStatus === "connected"} value={liveSocketStatus === "connected" ? "Browser connected" : "Browser disconnected"} />
+        <HealthCheckRow label="Socket /health endpoint" ok={socket.live?.ok} value={socket.live?.checked ? `${socket.live?.status || "No status"}${socket.live?.latency_ms !== null ? ` · ${socket.live.latency_ms}ms` : ""}` : "Not checked"} />
+        <HealthCheckRow label="Socket publish config" ok={socket.checks?.enabled && socket.checks?.has_url && socket.checks?.has_internal_key} value={socket.url || "Missing URL"} />
+        <HealthCheckRow label="Socket auth secret" ok={socket.checks?.has_auth_secret} value={socket.checks?.has_auth_secret ? "Configured" : "Missing"} />
+        <HealthCheckRow label="Firebase admin config" ok={firebase.admin?.ready} value={healthCheckText(firebaseAdmin, ["push_enabled", "has_project_id", "has_client_email", "has_private_key"])} />
+        <HealthCheckRow label="Firebase web config" ok={firebase.web?.ready} value={healthCheckText(firebaseWeb, ["has_api_key", "has_project_id", "has_sender_id", "has_app_id", "has_vapid_key"])} />
+        <HealthCheckRow label="Messaging service worker" ok={firebase.web?.service_worker?.has_public_config} value={firebase.web?.service_worker?.url || "/firebase-messaging-sw.js"} />
+        <HealthCheckRow label="Push devices" ok={(firebase.subscriptions?.total || 0) > 0} value={`client: ${roles.client || 0}, rider: ${roles.rider || 0}, office: ${(roles.office_admin || 0) + (roles.super_admin || 0)}`} />
+        <HealthCheckRow label="Laravel config cache" ok={!health.laravel?.config_cached} value={health.laravel?.config_cached ? "Cached" : "Not cached"} warnWhenOk={false} />
+      </div>
+    </div>
   );
 }
 
-function PushLogsAdmin() {
-  const [entries, setEntries] = useState([]);
-  const [devices, setDevices] = useState([]);
-  const [summary, setSummary] = useState({});
-  const [limit, setLimit] = useState(100);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const loadLogs = async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetchPushLogs({ limit });
-      setEntries(response.entries);
-      setDevices(response.devices);
-      setSummary(response.summary);
-    } catch (logError) {
-      setError(logError?.payload?.message || logError?.message || "Could not load push logs.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadLogs();
-  }, []);
-
-  const subscriptionsByRole = summary.subscriptions_by_role || {};
-  const configReady = summary.push_enabled && summary.has_project_id && summary.has_client_email && summary.has_private_key;
-
+function HealthSummaryCard({ icon, label, value, note, status }) {
   return (
-    <section className="panel glass push-log-page">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">PUSH TRACE</p>
-          <h2>Firebase push logs</h2>
-        </div>
-        <div className="push-log-actions">
-          <select onChange={(event) => setLimit(Number(event.target.value))} value={limit}>
-            <option value={50}>50 rows</option>
-            <option value={100}>100 rows</option>
-            <option value={200}>200 rows</option>
-            <option value={300}>300 rows</option>
-          </select>
-          <button className="btn secondary" disabled={loading} onClick={loadLogs} type="button">
-            <Icon name="refresh" size={15} />
-            {loading ? "Loading..." : "Refresh"}
-          </button>
-        </div>
+    <div className={`health-summary-card ${status.className}`}>
+      <span><Icon name={icon} size={16} /></span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+        <p>{note}</p>
       </div>
-
-      <div className="push-log-summary">
-        <div>
-          <small>Firebase config</small>
-          <strong className={configReady ? "ok" : "bad"}>{configReady ? "Ready" : "Check config"}</strong>
-        </div>
-        <div>
-          <small>Push enabled</small>
-          <strong className={summary.push_enabled ? "ok" : "bad"}>{summary.push_enabled ? "Yes" : "No"}</strong>
-        </div>
-        <div>
-          <small>Saved devices</small>
-          <strong>{summary.subscriptions || 0}</strong>
-        </div>
-        <div>
-          <small>Project ID</small>
-          <strong className={summary.has_project_id ? "ok" : "bad"}>{summary.has_project_id ? "Yes" : "No"}</strong>
-        </div>
-        <div>
-          <small>Client email</small>
-          <strong className={summary.has_client_email ? "ok" : "bad"}>{summary.has_client_email ? "Yes" : "No"}</strong>
-        </div>
-        <div>
-          <small>Private key</small>
-          <strong className={summary.has_private_key ? "ok" : "bad"}>{summary.has_private_key ? "Yes" : "No"}</strong>
-        </div>
-        <div>
-          <small>Config cache</small>
-          <strong>{summary.config_cached ? "Cached" : "Not cached"}</strong>
-        </div>
-        <div>
-          <small>Enabled value</small>
-          <strong>{String(summary.push_enabled_value ?? "") || "empty"}</strong>
-        </div>
-        <div>
-          <small>By role</small>
-          <strong>{Object.entries(subscriptionsByRole).map(([role, total]) => `${role}: ${total}`).join(", ") || "None"}</strong>
-        </div>
-      </div>
-
-      {error && <p className="auth-error">{error}</p>}
-
-      <div className="table-wrap">
-        <table className="push-log-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Level</th>
-              <th>Message</th>
-              <th>Context</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry, index) => (
-              <tr key={`${entry.timestamp || "line"}-${index}`}>
-                <td><small>{entry.timestamp || entry.file}</small></td>
-                <td><span className={`status status-${logLevelFamily(entry.level)}`}>{entry.level || "log"}</span></td>
-                <td><strong>{entry.message}</strong><small>{entry.file}</small></td>
-                <td>
-                  {entry.context
-                    ? <pre className="log-context">{JSON.stringify(entry.context, null, 2)}</pre>
-                    : <small>No context</small>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!entries.length && !loading && <p className="muted table-empty">No Firebase push log entries found yet.</p>}
-
-      <div className="panel-heading push-device-heading">
-        <div>
-          <p className="eyebrow">REGISTERED DEVICES</p>
-          <h2>Push-enabled accounts</h2>
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th>Role</th>
-              <th>Token hash</th>
-              <th>Last seen</th>
-              <th>Device</th>
-            </tr>
-          </thead>
-          <tbody>
-            {devices.map((device) => (
-              <tr key={device.id}>
-                <td><strong>{device.user_name || device.user_email || `User ${device.user_id}`}</strong><small>{device.user_email}</small></td>
-                <td><StatusBadge status={device.role || "unknown"} /></td>
-                <td><code className="token-hash">{device.token_hash}</code></td>
-                <td><small>{device.last_seen_at || "Unknown"}</small></td>
-                <td><small>{device.platform || "web"} - {device.user_agent || "Unknown browser"}</small></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!devices.length && !loading && <p className="muted table-empty">No push-enabled devices are registered.</p>}
-    </section>
+    </div>
   );
 }
 
-function logLevelFamily(level = "") {
-  if (["error", "critical", "alert", "emergency"].includes(level)) {
-    return "danger";
+function HealthCheckRow({ label, ok, value, warnWhenOk = true }) {
+  const good = Boolean(ok);
+  const family = good ? (warnWhenOk ? "success" : "info") : "warning";
+
+  return (
+    <div className="health-check-row">
+      <div>
+        <strong>{label}</strong>
+        <small>{value || "No value"}</small>
+      </div>
+      <span className={`status status-${family}`}><span className="status-dot" />{good ? "OK" : "Check"}</span>
+    </div>
+  );
+}
+
+function healthStatus(status) {
+  if (status === "ok") {
+    return { className: "ok", label: "Ready" };
   }
 
-  if (["warning", "notice"].includes(level)) {
-    return "warning";
+  if (status === "disabled") {
+    return { className: "disabled", label: "Disabled" };
   }
 
-  return "info";
+  return { className: "warning", label: "Check" };
+}
+
+function healthCheckText(checks, keys) {
+  const missing = keys.filter((key) => !checks[key]);
+
+  if (!missing.length) {
+    return "All required values present";
+  }
+
+  return `Missing ${missing.map((key) => key.replaceAll("_", " ")).join(", ")}`;
 }
 
 function userInitials(user) {
