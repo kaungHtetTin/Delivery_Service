@@ -141,13 +141,18 @@ try {
     const messaging = firebase.messaging();
 
     messaging.onBackgroundMessage((payload) => {
-      const notification = payload.notification || {};
+      if (payload.notification) {
+        return;
+      }
+
       const data = payload.data || {};
 
-      self.registration.showNotification(notification.title || data.title || "Delivery update", {
-        body: notification.body || data.body || "",
-        icon: notification.icon || defaultIconUrl,
+      self.registration.showNotification(data.title || "Delivery update", {
+        body: data.body || "",
+        icon: data.icon || defaultIconUrl,
         badge: defaultIconUrl,
+        tag: data.notification_id || data.order_id || undefined,
+        renotify: false,
         data: {
           link: data.link || defaultClickUrl,
         },

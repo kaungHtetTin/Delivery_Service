@@ -112,11 +112,14 @@ function showForegroundPushNotification(payload, appBaseUrl = "") {
   const body = notification.body || data.body || "";
   const link = data.link || window.location.href;
   const icon = new URL("pwa-icon-192.png", `${(appBaseUrl || window.location.origin).replace(/\/$/, "")}/`).toString();
+  const tag = data.notification_id || data.order_id || undefined;
 
   try {
     const browserNotification = new Notification(title, {
       body,
       icon,
+      tag,
+      renotify: false,
       data: { link },
     });
 

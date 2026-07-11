@@ -92,25 +92,20 @@ class FirebaseCloudMessaging
             ->map(fn ($value) => is_scalar($value) || $value === null ? (string) $value : json_encode($value))
             ->all();
         $link = $message['link'] ?? url('/client');
+        $title = $message['title'] ?? config('app.name');
+        $body = $message['body'] ?? '';
 
         return [
             'token' => $token,
-            'notification' => [
-                'title' => $message['title'] ?? config('app.name'),
-                'body' => $message['body'] ?? '',
-            ],
             'data' => $data + [
-                'title' => $message['title'] ?? config('app.name'),
-                'body' => $message['body'] ?? '',
+                'title' => $title,
+                'body' => $body,
                 'link' => $link,
+                'icon' => url('/pwa-icon-192.png'),
             ],
             'webpush' => [
                 'fcm_options' => [
                     'link' => $link,
-                ],
-                'notification' => [
-                    'icon' => url('/pwa-icon-192.png'),
-                    'badge' => url('/pwa-icon-192.png'),
                 ],
             ],
         ];
