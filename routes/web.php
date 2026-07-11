@@ -95,36 +95,42 @@ Route::get('/app.webmanifest', function () {
 })->name('app.manifest');
 Route::get('/firebase-messaging-sw.js', function () {
     $config = array_filter(
-        config('services.firebase.public'),
+        (array) config('services.firebase.public', []),
         fn ($value) => filled($value)
     );
-    $jsonConfig = json_encode($config, JSON_UNESCAPED_SLASHES);
+    $jsonConfig = json_encode((object) $config, JSON_UNESCAPED_SLASHES);
     $clientUrl = url('/client');
+    $iconUrl = url('/pwa-icon-192.png');
     $firebaseVersion = '12.16.0';
     $script = <<<JS
-importScripts("https://www.gstatic.com/firebasejs/{$firebaseVersion}/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/{$firebaseVersion}/firebase-messaging-compat.js");
-
 const firebaseConfig = {$jsonConfig};
 const defaultClickUrl = "{$clientUrl}";
+const defaultIconUrl = "{$iconUrl}";
 
-if (firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.messagingSenderId && firebaseConfig.appId) {
-  firebase.initializeApp(firebaseConfig);
-  const messaging = firebase.messaging();
+try {
+  if (firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.messagingSenderId && firebaseConfig.appId) {
+    importScripts("https://www.gstatic.com/firebasejs/{$firebaseVersion}/firebase-app-compat.js");
+    importScripts("https://www.gstatic.com/firebasejs/{$firebaseVersion}/firebase-messaging-compat.js");
 
-  messaging.onBackgroundMessage((payload) => {
-    const notification = payload.notification || {};
-    const data = payload.data || {};
+    firebase.initializeApp(firebaseConfig);
+    const messaging = firebase.messaging();
 
-    self.registration.showNotification(notification.title || data.title || "Delivery update", {
-      body: notification.body || data.body || "",
-      icon: notification.icon || "/pwa-icon-192.png",
-      badge: "/pwa-icon-192.png",
-      data: {
-        link: data.link || defaultClickUrl,
-      },
+    messaging.onBackgroundMessage((payload) => {
+      const notification = payload.notification || {};
+      const data = payload.data || {};
+
+      self.registration.showNotification(notification.title || data.title || "Delivery update", {
+        body: notification.body || data.body || "",
+        icon: notification.icon || defaultIconUrl,
+        badge: defaultIconUrl,
+        data: {
+          link: data.link || defaultClickUrl,
+        },
+      });
     });
-  });
+  }
+} catch (error) {
+  console.warn("[firebase-sw] setup_failed", error?.message || error);
 }
 
 self.addEventListener("notificationclick", (event) => {
@@ -145,7 +151,10 @@ self.addEventListener("notificationclick", (event) => {
 });
 JS;
 
-    return response($script, 200, ['Content-Type' => 'text/javascript']);
+    return response($script, 200, [
+        'Cache-Control' => 'no-cache, no-store, must-revalidate',
+        'Content-Type' => 'application/javascript; charset=UTF-8',
+    ]);
 })->name('firebase.messaging.worker');
 Route::view('/client', 'app', ['portal' => 'client'])->name('client');
 Route::view('/rider', 'app', ['portal' => 'rider'])->name('rider');
