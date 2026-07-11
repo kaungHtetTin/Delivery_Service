@@ -653,10 +653,20 @@ function escapeMarkerText(value) {
 
 function riderMarkerHtml(rider) {
   if (rider.profilePhotoUrl) {
-    return `<img alt="" src="${escapeMarkerText(rider.profilePhotoUrl)}" />`;
+    return `<img alt="" src="${escapeMarkerText(rider.profilePhotoUrl)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';" /><span>${escapeMarkerText(rider.initials)}</span>`;
   }
 
   return `<span>${escapeMarkerText(rider.initials)}</span>`;
+}
+
+function RiderAvatar({ className = "", rider }) {
+  return rider?.profilePhotoUrl
+    ? (
+      <span className={`avatar rider-photo-avatar ${className}`}>
+        <img alt="" src={rider.profilePhotoUrl} />
+      </span>
+    )
+    : <span className={`avatar ${className}`}>{rider?.initials || "R"}</span>;
 }
 
 function userInitials(user) {
@@ -876,7 +886,7 @@ function OrderTable({ onDelete, onEdit, orders, riders, selectOrder }) {
                 </td>
                 <td><strong>{order.receiver}</strong><small>{order.receiverPhone}</small></td>
                 <td><strong>{order.pickup.split(",")[0]} -&gt; {order.destination.split(",")[0]}</strong><small>{formatDeliveryFeeLabel(order)}</small></td>
-                <td>{rider ? <span className="rider-cell"><i>{rider.initials}</i>{rider.name}</span> : <span className="muted">Unassigned</span>}</td>
+                <td>{rider ? <span className="rider-cell"><RiderAvatar rider={rider} />{rider.name}</span> : <span className="muted">Unassigned</span>}</td>
                 <td><StatusBadge status={order.paymentStatus} /></td>
                 <td><StatusBadge status={order.status} /></td>
                 <td><small>{order.updatedAt}</small></td>
@@ -964,7 +974,7 @@ function CurrentAddressBoard({ orders, selectOrder }) {
 }
 
 function RiderSummary({ riders }) {
-  return <div className="rider-summary">{riders.slice(0, 4).map((rider) => <div key={rider.id}><span className="avatar">{rider.initials}</span><p><strong>{rider.name}</strong><small>{rider.area} - {rider.lastSeen}</small></p><StatusBadge status={rider.status} /></div>)}</div>;
+  return <div className="rider-summary">{riders.slice(0, 4).map((rider) => <div key={rider.id}><RiderAvatar rider={rider} /><p><strong>{rider.name}</strong><small>{rider.area} - {rider.lastSeen}</small></p><StatusBadge status={rider.status} /></div>)}</div>;
 }
 
 function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, onView, pagination, riders }) {
@@ -986,7 +996,7 @@ function RidersAdmin({ filters, onDelete, onEdit, onFilterChange, onNew, onView,
       <div className="table-wrap"><table><thead><tr><th>Rider</th><th>Status</th><th>Active orders</th><th>Current area</th><th>Last GPS update</th><th /></tr></thead><tbody>
         {riders.map((rider) => (
           <tr key={rider.id}>
-            <td><span className="rider-cell"><i>{rider.initials}</i><span><strong>{rider.name}</strong><small>{rider.phone}</small></span></span></td>
+            <td><span className="rider-cell"><RiderAvatar rider={rider} /><span><strong>{rider.name}</strong><small>{rider.phone}</small></span></span></td>
             <td><StatusBadge status={rider.status} /></td>
             <td>{rider.activeOrders}</td>
             <td>{rider.area}</td>
@@ -1045,7 +1055,7 @@ function RiderDetailPage({ mapTileUrl, onBack, onCollect, onEdit, onOpenOrder, o
           </div>
         </div>
         <div className="rider-detail-hero">
-          <span className="avatar large">{rider.initials}</span>
+          <RiderAvatar className="large" rider={rider} />
           <div>
             <strong>{rider.name}</strong>
             <small>{rider.phone || "No phone"} · {rider.vehicle || "Vehicle unavailable"}</small>
@@ -1204,7 +1214,7 @@ function RiderCollectionsAdmin({ filters, onCollect, onFilterChange, pagination,
       <div className="table-wrap"><table><thead><tr><th>Rider</th><th>Status</th><th>Current area</th><th>Active orders</th><th>Delivery fees held</th><th /></tr></thead><tbody>
         {riders.map((rider) => (
           <tr key={rider.id}>
-            <td><span className="rider-cell"><i>{rider.initials}</i><span><strong>{rider.name}</strong><small>{rider.phone}</small></span></span></td>
+            <td><span className="rider-cell"><RiderAvatar rider={rider} /><span><strong>{rider.name}</strong><small>{rider.phone}</small></span></span></td>
             <td><StatusBadge status={rider.status} /></td>
             <td>{rider.area}</td>
             <td>{rider.activeOrders}</td>
@@ -1963,8 +1973,9 @@ function AdminMap({ large = false, mapTileUrl, onSelectOrder, orders = [], rider
         </div>
         {selectedRider ? (
           <div className="map-rider-detail">
-            <div className="card-row">
-              <div><p className="eyebrow">SELECTED RIDER</p><h3>{selectedRider.name}</h3></div>
+            <div className="map-rider-profile">
+              <RiderAvatar className="large" rider={selectedRider} />
+              <div><p className="eyebrow">SELECTED RIDER</p><h3>{selectedRider.name}</h3><small>{selectedRider.phone || selectedRider.id}</small></div>
               <StatusBadge status={selectedRider.status} />
             </div>
             <div className="detail-row"><span>Last update</span><strong>{locationAgeLabel(selectedRider.currentLocation?.recordedAt)}</strong></div>
@@ -2071,7 +2082,7 @@ function AssignmentModal({ order, riders, close, onAssign }) {
           {filteredRiders.length === 0 && <p className="muted assignment-empty">No riders match this search.</p>}
           {filteredRiders.map((rider) => (
             <button className={selected === rider.id ? "selected" : ""} disabled={!assignableStatuses.has(rider.status)} key={rider.id} onClick={() => setSelected(rider.id)} type="button">
-              <span className="avatar">{rider.initials}</span><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} processing order{rider.activeOrders === 1 ? "" : "s"} - {assignableStatuses.has(rider.status) ? rider.lastSeen : "not assignable"}</small></span><StatusBadge status={rider.status} />
+              <RiderAvatar rider={rider} /><span><strong>{rider.name}</strong><small>{rider.area} - {rider.activeOrders} processing order{rider.activeOrders === 1 ? "" : "s"} - {assignableStatuses.has(rider.status) ? rider.lastSeen : "not assignable"}</small></span><StatusBadge status={rider.status} />
             </button>
           ))}
         </div>
