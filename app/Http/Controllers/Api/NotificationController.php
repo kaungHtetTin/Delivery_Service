@@ -157,6 +157,22 @@ class NotificationController extends Controller
                     ->groupBy('users.role')
                     ->pluck('total', 'users.role'),
             ],
+            'devices' => PushSubscription::query()
+                ->with('user:id,name,email,role')
+                ->latest('last_seen_at')
+                ->limit(100)
+                ->get()
+                ->map(fn (PushSubscription $subscription) => [
+                    'id' => $subscription->id,
+                    'user_id' => $subscription->user_id,
+                    'user_name' => $subscription->user?->name,
+                    'user_email' => $subscription->user?->email,
+                    'role' => $subscription->user?->role,
+                    'platform' => $subscription->platform,
+                    'token_hash' => hash('sha256', $subscription->token),
+                    'last_seen_at' => $subscription->last_seen_at?->toDateTimeString(),
+                    'user_agent' => str($subscription->user_agent ?: '')->limit(120)->toString(),
+                ]),
         ]);
     }
 
@@ -187,7 +203,7 @@ class NotificationController extends Controller
         $body = $matches['body'];
         $context = null;
 
-        if (preg_match('/^(?<message>.*?)\s+(?<context>\{.*\})$/', $body, $bodyMatches)) {
+        if (preg_match('/^(?<message>.*?)\s+(?<context>\{.*\})(?:\s+\[.*\])?$/', $body, $bodyMatches)) {
             $decoded = json_decode($bodyMatches['context'], true);
 
             if (json_last_error() === JSON_ERROR_NONE) {

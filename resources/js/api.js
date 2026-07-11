@@ -335,6 +335,7 @@ export async function fetchPushLogs({ limit = 100 } = {}) {
   return {
     summary: response.summary || {},
     entries: response.data || [],
+    devices: response.devices || [],
   };
 }
 

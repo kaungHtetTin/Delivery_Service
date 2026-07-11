@@ -222,6 +222,8 @@ small { color: var(--color-muted); font-size: 11px; }
 .push-log-summary strong.bad { color: #ce4444; }
 .push-log-table td { vertical-align: top; }
 .log-context { max-width: 460px; max-height: 160px; margin: 0; overflow: auto; padding: 8px; color: var(--color-text); background: var(--color-soft); border: 1px solid var(--color-border); border-radius: 6px; font-size: 11px; line-height: 1.35; white-space: pre-wrap; }
+.push-device-heading { margin-top: 10px; }
+.token-hash { display: block; max-width: 280px; overflow: hidden; color: var(--color-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .account-logout { margin-top: 16px; }
 .rider-account-page { padding-bottom: 86px; }
 .rider-account-form { gap: 10px; }

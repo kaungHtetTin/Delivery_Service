@@ -628,6 +628,7 @@ function PushBroadcastAdmin() {
 
 function PushLogsAdmin() {
   const [entries, setEntries] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [summary, setSummary] = useState({});
   const [limit, setLimit] = useState(100);
   const [loading, setLoading] = useState(false);
@@ -640,6 +641,7 @@ function PushLogsAdmin() {
     try {
       const response = await fetchPushLogs({ limit });
       setEntries(response.entries);
+      setDevices(response.devices);
       setSummary(response.summary);
     } catch (logError) {
       setError(logError?.payload?.message || logError?.message || "Could not load push logs.");
@@ -744,6 +746,38 @@ function PushLogsAdmin() {
         </table>
       </div>
       {!entries.length && !loading && <p className="muted table-empty">No Firebase push log entries found yet.</p>}
+
+      <div className="panel-heading push-device-heading">
+        <div>
+          <p className="eyebrow">REGISTERED DEVICES</p>
+          <h2>Push-enabled accounts</h2>
+        </div>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Role</th>
+              <th>Token hash</th>
+              <th>Last seen</th>
+              <th>Device</th>
+            </tr>
+          </thead>
+          <tbody>
+            {devices.map((device) => (
+              <tr key={device.id}>
+                <td><strong>{device.user_name || device.user_email || `User ${device.user_id}`}</strong><small>{device.user_email}</small></td>
+                <td><StatusBadge status={device.role || "unknown"} /></td>
+                <td><code className="token-hash">{device.token_hash}</code></td>
+                <td><small>{device.last_seen_at || "Unknown"}</small></td>
+                <td><small>{device.platform || "web"} - {device.user_agent || "Unknown browser"}</small></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!devices.length && !loading && <p className="muted table-empty">No push-enabled devices are registered.</p>}
     </section>
   );
 }
