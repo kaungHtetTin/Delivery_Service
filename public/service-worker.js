@@ -1,8 +1,8 @@
-const CACHE_NAME = "flowdrop-app-v3";
-const scopePath = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+const CACHE_NAME = "flowdrop-app-v4";
+const scopeUrl = new URL(self.registration.scope);
+const scopePath = scopeUrl.pathname.replace(/\/$/, "");
 const scoped = (path) => `${scopePath}${path.startsWith("/") ? path : `/${path}`}`;
 const APP_SHELL = [
-  scoped("/"),
   scoped("/client"),
   scoped("/rider"),
   scoped("/office"),
@@ -13,10 +13,30 @@ const APP_SHELL = [
   scoped("/app.webmanifest")
 ];
 
+const isInAppScope = (url) => url.origin === self.location.origin
+  && (url.pathname === scopePath || url.pathname.startsWith(`${scopePath}/`));
+
+async function cacheIfOk(request, response) {
+  if (!response?.ok) {
+    return;
+  }
+
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(request, response.clone());
+  } catch {
+    // Cache writes are best effort; a failed write should not break a request.
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+      .then((cache) => Promise.all(APP_SHELL.map((url) => (
+        fetch(url, { cache: "reload" })
+          .then((response) => response.ok ? cache.put(url, response.clone()) : null)
+          .catch(() => null)
+      ))))
       .then(() => self.skipWaiting())
   );
 });
@@ -33,7 +53,7 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith(scoped("/api"))) {
+  if (request.method !== "GET" || !isInAppScope(url) || url.pathname.startsWith(scoped("/api"))) {
     return;
   }
 
@@ -41,8 +61,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          event.waitUntil(cacheIfOk(request, response));
           return response;
         })
         .catch(() => caches.match(request).then((cached) => cached || caches.match(scoped("/offline.html"))))
@@ -53,10 +72,7 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     caches.match(request)
       .then((cached) => cached || fetch(request).then((response) => {
-        if (response.ok && url.origin === self.location.origin) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        }
+        event.waitUntil(cacheIfOk(request, response));
         return response;
       }))
   );
