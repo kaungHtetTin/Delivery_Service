@@ -38,7 +38,7 @@
     "src": "node_modules/leaflet/dist/images/marker-icon.png"
   },
   "resources/js/main.jsx": {
-    "file": "assets/main-BWf0EkAM.js",
+    "file": "assets/main-Btz23RHn.js",
     "name": "main",
     "src": "resources/js/main.jsx",
     "isEntry": true,
@@ -50,7 +50,7 @@
       "node_modules/firebase/messaging/dist/esm/index.esm.js"
     ],
     "css": [
-      "assets/main-DxT00LUa.css"
+      "assets/main-Cx-XRSjm.css"
     ],
     "assets": [
       "assets/layers-BWBAp2CZ.png",

@@ -489,8 +489,6 @@ td strong, td small { display: block; } td small { margin-top: 3px; }
 .admin-map .leaflet-control-zoom a { color: var(--color-text); background: var(--color-surface); border-bottom-color: var(--color-border); }
 .rider-map-marker { display: grid; width: 34px; height: 34px; color: #fff; background: var(--color-primary); border: 2px solid #fff; border-radius: 50%; box-shadow: 0 8px 16px rgb(0 0 0 / 24%); place-items: center; }
 .rider-map-marker span { display: grid; width: 100%; height: 100%; place-items: center; font-size: 9px; font-weight: 900; letter-spacing: .02em; }
-.rider-map-marker img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-.rider-map-marker img + span { display: none; }
 .rider-map-marker.fresh { background: #19a86b; }
 .rider-map-marker.warning { background: #de9600; }
 .rider-map-marker.stale, .rider-map-marker.no_gps { background: #8b98a8; }

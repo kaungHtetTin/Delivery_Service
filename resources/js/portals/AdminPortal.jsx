@@ -652,10 +652,6 @@ function escapeMarkerText(value) {
 }
 
 function riderMarkerHtml(rider) {
-  if (rider.profilePhotoUrl) {
-    return `<img alt="" src="${escapeMarkerText(rider.profilePhotoUrl)}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';" /><span>${escapeMarkerText(rider.initials)}</span>`;
-  }
-
   return `<span>${escapeMarkerText(rider.initials)}</span>`;
 }
 
