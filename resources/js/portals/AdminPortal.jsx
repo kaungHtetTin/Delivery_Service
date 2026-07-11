@@ -690,6 +690,26 @@ function PushLogsAdmin() {
           <strong>{summary.subscriptions || 0}</strong>
         </div>
         <div>
+          <small>Project ID</small>
+          <strong className={summary.has_project_id ? "ok" : "bad"}>{summary.has_project_id ? "Yes" : "No"}</strong>
+        </div>
+        <div>
+          <small>Client email</small>
+          <strong className={summary.has_client_email ? "ok" : "bad"}>{summary.has_client_email ? "Yes" : "No"}</strong>
+        </div>
+        <div>
+          <small>Private key</small>
+          <strong className={summary.has_private_key ? "ok" : "bad"}>{summary.has_private_key ? "Yes" : "No"}</strong>
+        </div>
+        <div>
+          <small>Config cache</small>
+          <strong>{summary.config_cached ? "Cached" : "Not cached"}</strong>
+        </div>
+        <div>
+          <small>Enabled value</small>
+          <strong>{String(summary.push_enabled_value ?? "") || "empty"}</strong>
+        </div>
+        <div>
           <small>By role</small>
           <strong>{Object.entries(subscriptionsByRole).map(([role, total]) => `${role}: ${total}`).join(", ") || "None"}</strong>
         </div>

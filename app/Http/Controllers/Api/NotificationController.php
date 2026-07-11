@@ -145,9 +145,11 @@ class NotificationController extends Controller
             'data' => $entries,
             'summary' => [
                 'push_enabled' => filter_var(config('services.firebase.push_enabled'), FILTER_VALIDATE_BOOL),
+                'push_enabled_value' => config('services.firebase.push_enabled'),
                 'has_project_id' => filled(config('services.firebase.project_id')),
                 'has_client_email' => filled(config('services.firebase.client_email')),
                 'has_private_key' => filled(config('services.firebase.private_key')),
+                'config_cached' => app()->configurationIsCached(),
                 'subscriptions' => PushSubscription::query()->count(),
                 'subscriptions_by_role' => PushSubscription::query()
                     ->join('users', 'users.id', '=', 'push_subscriptions.user_id')
