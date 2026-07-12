@@ -3,6 +3,8 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AdminLogController;
+use App\Http\Controllers\Api\Android\RiderAppController as AndroidRiderAppController;
+use App\Http\Controllers\Api\Android\RiderAuthController as AndroidRiderAuthController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientAddressController;
 use App\Http\Controllers\Api\ClientProfileController;
@@ -37,6 +39,7 @@ use App\Http\Controllers\Api\UserProfileController;
 
 Route::post('auth/token', [AuthController::class, 'token']);
 Route::post('auth/register', [AuthController::class, 'register']);
+Route::post('android/rider/auth/token', [AndroidRiderAuthController::class, 'token']);
 Route::get('settings/public', [SystemSettingController::class, 'publicIndex']);
 Route::post('notifications/push-worker-trace', [NotificationController::class, 'pushWorkerTrace'])
     ->middleware('throttle:60,1');
@@ -126,5 +129,23 @@ Route::middleware(['auth:sanctum', 'role:rider,office_admin,super_admin'])->grou
     Route::post('riders/{rider}/locations', [RiderController::class, 'storeLocation'])
         ->middleware('throttle:rider-locations');
 });
+
+Route::prefix('android/rider')
+    ->middleware(['auth:sanctum', 'role:rider'])
+    ->group(function () {
+        Route::get('bootstrap', [AndroidRiderAppController::class, 'bootstrap']);
+        Route::get('jobs', [AndroidRiderAppController::class, 'jobs']);
+        Route::get('jobs/{deliveryOrder}', [AndroidRiderAppController::class, 'showJob']);
+        Route::post('jobs/{deliveryOrder}/action', [AndroidRiderAppController::class, 'progressJob']);
+        Route::post('duty/start', [AndroidRiderAppController::class, 'startDuty']);
+        Route::post('duty/stop', [AndroidRiderAppController::class, 'stopDuty']);
+        Route::post('locations', [AndroidRiderAppController::class, 'storeLocation'])
+            ->middleware('throttle:rider-locations');
+        Route::post('gps-events', [AndroidRiderAppController::class, 'gpsEvent']);
+        Route::get('notifications', [AndroidRiderAppController::class, 'notifications']);
+        Route::patch('notifications/{notification}/read', [AndroidRiderAppController::class, 'markNotificationRead']);
+        Route::post('device-token', [AndroidRiderAppController::class, 'saveDeviceToken']);
+        Route::delete('device-token', [AndroidRiderAppController::class, 'deleteDeviceToken']);
+    });
 
 Route::post('payments/{payment}/screenshot', [PaymentController::class, 'uploadScreenshot']);
